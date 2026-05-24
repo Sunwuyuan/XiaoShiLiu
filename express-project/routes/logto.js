@@ -28,7 +28,6 @@ async function checkLogtoColumnExists() {
 }
 
 // 获取 Logto Token
-// 使用授权码换取访问令牌
 async function getLogtoToken(code) {
   const tokenUrl = `${LOGTO_CONFIG.endpoint}/oidc/token`;
   
@@ -39,10 +38,19 @@ async function getLogtoToken(code) {
   params.append('client_id', LOGTO_CONFIG.appId);
   params.append('client_secret', LOGTO_CONFIG.appSecret);
 
+  console.log('正在请求 Logto Token...');
+  console.log('Token URL:', tokenUrl);
+  
   const response = await axios.post(tokenUrl, params, {
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     }
+  });
+
+  console.log('Token 请求成功:', {
+    hasAccessToken: !!response.data.access_token,
+    tokenType: response.data.token_type,
+    expiresIn: response.data.expires_in
   });
 
   return response.data;
@@ -52,10 +60,22 @@ async function getLogtoToken(code) {
 async function getLogtoUserInfo(accessToken) {
   const userInfoUrl = `${LOGTO_CONFIG.endpoint}/oidc/me`;
 
+  console.log('正在请求 Logto 用户信息...');
+  console.log('用户信息 URL:', userInfoUrl);
+
   const response = await axios.get(userInfoUrl, {
     headers: {
       Authorization: `Bearer ${accessToken}`
     }
+  });
+
+  console.log('用户信息请求成功:', {
+    sub: response.data.sub,
+    name: response.data.name,
+    nickname: response.data.nickname,
+    username: response.data.username,
+    email: response.data.email,
+    picture: response.data.picture ? '有头像' : '无头像'
   });
 
   return response.data;
@@ -64,21 +84,38 @@ async function getLogtoUserInfo(accessToken) {
 // 从 Logto 用户 ID 查找或创建本地用户
 async function findOrCreateUser(logtoUser, req) {
   const logtoColumnExists = await checkLogtoColumnExists();
-  const logtoId = logtoUser.sub; // Logto 的 sub 就是用户的唯一 ID
+  const logtoId = logtoUser.sub;
   const nickname = logtoUser.name || logtoUser.nickname || logtoUser.username || 'Logto 用户';
   const avatar = logtoUser.picture || '';
   const email = logtoUser.email || '';
   
+  console.log('处理用户数据:', {
+    logtoId,
+    nickname,
+    hasAvatar: !!avatar,
+    email
+  });
+  
   let user;
   
   if (logtoColumnExists) {
+    console.log('检测到 logto_id 列存在，使用 Logto ID 查找用户');
+    
     let [users] = await pool.execute(
       'SELECT * FROM users WHERE logto_id = ?',
       [logtoId]
     );
     
+    console.log('数据库查询结果:', {
+      found: users.length > 0,
+      userId: users.length > 0 ? users[0].id : null,
+      nickname: users.length > 0 ? users[0].nickname : null
+    });
+    
     if (users.length > 0) {
       user = users[0];
+      console.log('找到已存在的 Logto 用户，更新登录时间');
+      
       await pool.execute(
         'UPDATE users SET last_login_at = NOW() WHERE id = ?',
         [user.id]
@@ -86,6 +123,7 @@ async function findOrCreateUser(logtoUser, req) {
       return user;
     }
     
+    console.log('未找到 Logto 用户，创建新用户');
     const userIP = getRealIP(req);
     let ipLocation = '未知';
     try {
@@ -108,6 +146,12 @@ async function findOrCreateUser(logtoUser, req) {
       ]
     );
     
+    console.log('新用户创建成功:', {
+      databaseId: result.insertId,
+      userId: userId.slice(0, 15),
+      nickname
+    });
+    
     const [newUsers] = await pool.execute(
       'SELECT * FROM users WHERE id = ?',
       [result.insertId]
@@ -115,6 +159,10 @@ async function findOrCreateUser(logtoUser, req) {
     
     return newUsers[0];
   } else {
+    console.log('logto_id 列不存在，使用备用方式查找用户');
+    
+    // 如果没有 logto_id 列，就不能保证用户唯一性了
+    // 这里简化处理，为每次登录创建新用户
     const userIP = getRealIP(req);
     let ipLocation = '未知';
     try {
@@ -149,6 +197,7 @@ async function findOrCreateUser(logtoUser, req) {
 router.get('/sign-in', async (req, res) => {
   try {
     if (!LOGTO_CONFIG.endpoint || !LOGTO_CONFIG.appId) {
+      console.error('Logto 配置不完整，无法生成登录 URL');
       return res.status(HTTP_STATUS.BAD_REQUEST).json({
         code: RESPONSE_CODES.ERROR,
         message: 'Logto 配置未完成，请检查环境变量配置'
@@ -164,6 +213,8 @@ router.get('/sign-in', async (req, res) => {
       `&response_type=code` +
       `&scope=openid profile email` +
       `&state=${state}`;
+    
+    console.log('生成 Logto 登录 URL:', signInUrl);
     
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -188,28 +239,46 @@ router.post('/callback', async (req, res) => {
     const { code, state } = req.body;
     
     if (!code) {
+      console.error('回调请求缺少授权码');
       return res.status(HTTP_STATUS.BAD_REQUEST).json({
         code: RESPONSE_CODES.VALIDATION_ERROR,
         message: '缺少授权码'
       });
     }
 
+    console.log('=== Logto 登录开始 ===');
+    console.log('Logto 配置检查:');
+    console.log('  - endpoint:', LOGTO_CONFIG.endpoint);
+    console.log('  - appId:', LOGTO_CONFIG.appId ? '已设置' : '未设置');
+    console.log('  - appSecret:', LOGTO_CONFIG.appSecret ? '已设置' : '未设置');
+
     if (!LOGTO_CONFIG.endpoint || !LOGTO_CONFIG.appId || !LOGTO_CONFIG.appSecret) {
+      console.error('Logto 配置不完整，无法进行 OAuth 登录');
       return res.status(HTTP_STATUS.BAD_REQUEST).json({
         code: RESPONSE_CODES.ERROR,
-        message: 'Logto 配置未完成'
+        message: 'Logto 配置未完成，请检查环境变量 LOGTO_ENDPOINT, LOGTO_APP_ID, LOGTO_APP_SECRET'
       });
     }
 
     console.log('处理 Logto 回调，code:', code);
     
     const tokenData = await getLogtoToken(code);
+    
     const logtoUser = await getLogtoUserInfo(tokenData.access_token);
-    console.log('获取到 Logto 用户信息:', logtoUser);
+    
+    // 验证 Logto 用户数据
+    if (!logtoUser || !logtoUser.sub) {
+      console.error('Logto 用户信息无效:', logtoUser);
+      return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+        code: RESPONSE_CODES.ERROR,
+        message: '无法获取 Logto 用户信息'
+      });
+    }
     
     const user = await findOrCreateUser(logtoUser, req);
     
     if (!user) {
+      console.error('用户创建失败');
       return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
         code: RESPONSE_CODES.ERROR,
         message: '用户登录失败'
@@ -222,6 +291,14 @@ router.post('/callback', async (req, res) => {
     });
     
     delete user.password;
+    
+    console.log('=== Logto 登录成功 ===');
+    console.log('本地用户信息:', {
+      id: user.id,
+      user_id: user.user_id,
+      nickname: user.nickname,
+      logto_id: user.logto_id
+    });
     
     res.json({
       code: RESPONSE_CODES.SUCCESS,
