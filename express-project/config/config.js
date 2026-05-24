@@ -141,6 +141,16 @@ const config = {
     backupApi: process.env.IP_LOCATION_BACKUP_API || 'https://api.pearktrue.cn/api/ip/high',
     primaryTimeout: parseInt(process.env.IP_LOCATION_PRIMARY_TIMEOUT) || 10000,
     backupTimeout: parseInt(process.env.IP_LOCATION_BACKUP_TIMEOUT) || 5000
+  },
+
+  // Logto 配置
+  logto: {
+    endpoint: process.env.LOGTO_ENDPOINT || 'https://logto.example.com',
+    appId: process.env.LOGTO_APP_ID || '',
+    appSecret: process.env.LOGTO_APP_SECRET || '',
+    redirectUri: process.env.LOGTO_REDIRECT_URI || 'http://localhost:5173/callback',
+    postLogoutRedirectUri: process.env.LOGTO_POST_LOGOUT_REDIRECT_URI || 'http://localhost:5173',
+    cookieSecret: process.env.LOGTO_COOKIE_SECRET || crypto.randomBytes(32).toString('hex')
   }
 };
 

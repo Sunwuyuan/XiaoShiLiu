@@ -84,6 +84,18 @@
           </button>
         </form>
 
+        <div class="divider">
+          <span>或者</span>
+        </div>
+
+        <div class="logto-section">
+          <LogtoLoginButton 
+            :button-text="isLoginMode ? '使用 云认证 登录' : '使用 云认证 注册'" 
+            @success="handleLogtoSuccess"
+            @error="handleLogtoError"
+          />
+        </div>
+
         <div class="auth-switch">
           <span class="switch-text">
             {{ isLoginMode ? '还没有账号？' : '已有账号？' }}
@@ -115,6 +127,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import SvgIcon from '@/components/SvgIcon.vue'
 import MessageToast from '@/components/MessageToast.vue'
 import CaptchaModal from '@/components/modals/CaptchaModal.vue'
+import LogtoLoginButton from '@/components/LogtoLoginButton.vue'
 import { useUserStore } from '@/stores/user.js'
 import { useScrollLock } from '@/composables/useScrollLock'
 
@@ -558,6 +571,21 @@ const openResetPassword = () => {
   }, 200)
 }
 
+// Logto 登录成功处理
+const handleLogtoSuccess = (userData) => {
+  showToastMessage('登录成功！', 'success')
+  emit('success')
+  closeModal()
+  setTimeout(() => {
+    window.location.reload()
+  }, 500)
+}
+
+// Logto 登录失败处理
+const handleLogtoError = (error) => {
+  unifiedMessage.value = error.message || '登录失败，请稍后重试'
+}
+
 // 获取邮件功能配置
 const fetchEmailConfig = async () => {
   try {
@@ -774,6 +802,30 @@ onMounted(() => {
   100% {
     transform: rotate(360deg);
   }
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 24px 0;
+  color: var(--text-color-secondary);
+  font-size: 14px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.divider span {
+  padding: 0 16px;
+}
+
+.logto-section {
+  margin-bottom: 8px;
 }
 
 .auth-switch {

@@ -209,6 +209,24 @@ export const commentApi = {
   }
 }
 
+// Logto 相关API
+export const logtoApi = {
+  // 获取 Logto 登录 URL
+  getSignInUrl() {
+    return request.get('/logto/sign-in')
+  },
+
+  // Logto 回调处理
+  handleCallback(data) {
+    return request.post('/logto/callback', data)
+  },
+
+  // 获取 Logto 登出 URL
+  getSignOutUrl() {
+    return request.get('/logto/sign-out')
+  }
+}
+
 // 认证相关API
 export const authApi = {
   // 用户登录

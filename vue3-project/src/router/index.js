@@ -12,6 +12,7 @@ import SearchResult from '@/views/search/SearchResult.vue'
 import PostManagementPage from '@/views/post-management/index.vue'
 import DraftBoxPage from '@/views/draft-box/index.vue'
 import NotFound from '@/views/NotFound.vue'
+import LogtoCallback from '@/views/LogtoCallback.vue'
 import { getValidChannelPaths } from '@/config/channels'
 
 // 后台管理系统组件
@@ -37,6 +38,12 @@ import PostAudit from '@/views/admin/PostAudit.vue'
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    // Logto 回调路由
+    {
+      path: '/callback',
+      name: 'logto_callback',
+      component: LogtoCallback
+    },
     {
       path: '/',
       component: layout,

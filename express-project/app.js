@@ -19,6 +19,7 @@ const { startAutoUnbanService } = require('./utils/autoUnban');
 
 // 导入路由模块
 const authRoutes = require('./routes/auth');
+const { router: logtoRoutes } = require('./routes/logto');
 const usersRoutes = require('./routes/users');
 const postsRoutes = require('./routes/posts');
 const commentsRoutes = require('./routes/comments');
@@ -84,6 +85,7 @@ app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
 app.use('/api/upload', uploadLimiter);
 app.use('/api/auth', authRoutes);
+app.use('/api/logto', logtoRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/comments', commentsRoutes);
