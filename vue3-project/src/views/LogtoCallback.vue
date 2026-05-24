@@ -3,7 +3,7 @@
     <div class="callback-container">
       <div class="loading-content" v-if="isLoading">
         <div class="loading-spinner"></div>
-        <p class="loading-text">正在登录...</p>
+        <p class="loading-text">{{ loadingText }}</p>
       </div>
       <div class="error-content" v-else-if="error">
         <SvgIcon name="alert" class="error-icon" />
@@ -30,6 +30,7 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const isLoading = ref(true)
+const loadingText = ref('正在登录...')
 const error = ref('')
 const success = ref(false)
 
@@ -39,28 +40,60 @@ const goHome = () => {
 
 const handleCallback = async () => {
   try {
+    console.log('=== Logto 回调开始处理 ===')
+    
     // 获取 URL 参数
     const urlParams = new URLSearchParams(window.location.search)
     const code = urlParams.get('code')
     const state = urlParams.get('state')
 
+    console.log('URL 参数:', { code, state })
+
     if (!code) {
       throw new Error('缺少授权码')
     }
 
+    loadingText.value = '正在获取用户信息...'
+    
     // 调用后端回调接口
+    console.log('开始调用后端 callback 接口...')
     const response = await logtoApi.handleCallback({ code, state })
 
+    console.log('后端响应:', response)
+
     if (response.success && response.data) {
+      loadingText.value = '正在同步登录状态...'
+      
+      console.log('调用 userStore.loginWithLogto...')
+      
       // 使用专门的 Logto 登录处理方法
       const result = await userStore.loginWithLogto(response.data)
       
+      console.log('loginWithLogto 结果:', result)
+      
       if (result.success) {
+        // 登录成功，不需要额外调用 getCurrentUser！
+        // 直接信任后端返回的用户数据
+        
         success.value = true
         isLoading.value = false
 
-        // 延迟跳转
+        console.log('当前登录状态检查:', {
+          token: !!userStore.token,
+          userInfo: !!userStore.userInfo,
+          isLoggedIn: userStore.isLoggedIn
+        })
+        
+        console.log('localStorage 检查:', {
+          token: !!localStorage.getItem('token'),
+          userInfo: !!localStorage.getItem('userInfo')
+        })
+
+        console.log('等待 1.5 秒后跳转...')
+        
+        // 延迟跳转，确保所有状态都已更新完成
         setTimeout(() => {
+          console.log('跳转到首页...')
           router.push('/')
         }, 1500)
       } else {
@@ -77,6 +110,7 @@ const handleCallback = async () => {
 }
 
 onMounted(() => {
+  console.log('LogtoCallback 组件已挂载')
   handleCallback()
 })
 </script>
