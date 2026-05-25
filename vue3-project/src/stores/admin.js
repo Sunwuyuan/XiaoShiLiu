@@ -11,7 +11,7 @@ export const useAdminStore = defineStore('admin', () => {
 
   // 计算属性
   const isLoggedIn = computed(() => !!admin.value && !!token.value)
-  const isSuperAdmin = computed(() => admin.value?.is_super || false)
+  const isSuperAdmin = computed(() => admin.value?.isSuper || admin.value?.is_super || false)
 
   // 权限检查
   const hasPermission = (perm) => {
