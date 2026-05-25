@@ -1,6 +1,6 @@
-# 部署指南
+﻿# 部署指南
 
-本文件提供 XiaoShiLiu 圖文社區項目的部署流程及配置說明。
+本文件提供 yuecommunity 圖文社區項目的部署流程及配置說明。
 
 ## 部署方法
 
@@ -9,7 +9,7 @@
 1. **Docker 一鍵部署**（推薦）- 簡單快捷，適合生產環境
 2. **傳統部署** - 手動配置，適合開發環境
 
-> 💡 **寶塔面板部署**：如果您使用寶塔面板，可以參考這個詳細的圖文教程：[使用寶塔搭建小石榴圖文社區完整教程](https://www.sakuraidc.cc/forum-post/3116.html)
+> 💡 **寶塔面板部署**：如果您使用寶塔面板，可以參考這個詳細的圖文教程：[使用寶塔搭建悦社圖文社區完整教程](https://www.sakuraidc.cc/forum-post/3116.html)
 
 ---
 
@@ -38,8 +38,8 @@
 #### 1. 克隆項目
 
 ```bash
-git clone https://github.com/ZTMYO/XiaoShiLiu.git
-cd XiaoShiLiu
+git clone https://github.com/ZTMYO/yuecommunity.git
+cd yuecommunity
 ```
 
 #### 2. 配置環境變數
@@ -54,13 +54,13 @@ cp .env.docker .env
 ```env
 # 資料庫配置
 DB_HOST=mysql
-DB_USER=xiaoshiliu_user
+DB_USER=yuecommunity_user
 DB_PASSWORD=123456
-DB_NAME=xiaoshiliu
+DB_NAME=yuecommunity
 DB_PORT=3306
 
 # JWT配置
-JWT_SECRET=xiaoshiliu_secret_key_2025_docker
+JWT_SECRET=yuecommunity_secret_key_2025_docker
 JWT_EXPIRES_IN=7d
 REFRESH_TOKEN_EXPIRES_IN=30d
 
@@ -116,7 +116,7 @@ SMTP_PASSWORD=your_email_password
 # 發件人郵箱
 EMAIL_FROM=your_email@example.com
 # 發件人名稱
-EMAIL_FROM_NAME=小石榴校園圖文社區
+EMAIL_FROM_NAME=悦社校園圖文社區
 
 # IP屬地查詢配置
 # 主API地址
@@ -220,7 +220,7 @@ PORT=3001
 NODE_ENV=development
 
 # JWT 配置
-JWT_SECRET=xiaoshiliu_secret_key_2025
+JWT_SECRET=yuecommunity_secret_key_2025
 JWT_EXPIRES_IN=7d
 REFRESH_TOKEN_EXPIRES_IN=30d
 
@@ -228,7 +228,7 @@ REFRESH_TOKEN_EXPIRES_IN=30d
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=123456
-DB_NAME=xiaoshiliu
+DB_NAME=yuecommunity
 DB_PORT=3306
 
 # 上傳配置
@@ -296,7 +296,7 @@ SMTP_PASSWORD=your_email_password
 # 發件人郵箱
 EMAIL_FROM=your_email@example.com
 # 發件人名稱
-EMAIL_FROM_NAME=小石榴校園圖文社區
+EMAIL_FROM_NAME=悦社校園圖文社區
 ```
 
 #### 前端環境變數 (.env)
@@ -500,7 +500,7 @@ docker-compose exec backend ls -la /app/uploads
    SMTP_USER=your_email@example.com
    SMTP_PASSWORD=your_email_password
    EMAIL_FROM=your_email@example.com
-   EMAIL_FROM_NAME=小石榴校園圖文社區
+   EMAIL_FROM_NAME=悦社校園圖文社區
    ```
 
 2. **禁用郵件功能** (`EMAIL_ENABLED=false`，預設)
@@ -763,7 +763,7 @@ NODE_ENV=development
 PORT=3001
 
 # JWT 配置
-JWT_SECRET=xiaoshiliu_secret_key_2025
+JWT_SECRET=yuecommunity_secret_key_2025
 JWT_EXPIRES_IN=7d
 REFRESH_TOKEN_EXPIRES_IN=30d
 
@@ -771,7 +771,7 @@ REFRESH_TOKEN_EXPIRES_IN=30d
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=123456
-DB_NAME=xiaoshiliu
+DB_NAME=yuecommunity
 DB_PORT=3306
 
 # API 配置
@@ -802,7 +802,7 @@ VIDEO_UPLOAD_STRATEGY=local
   cd express-project
   node scripts/init-database.js
 
-- **描述**：必須執行首次部署，將自動建立 `xiaoshiliu` 資料庫及 12 個資料表
+- **描述**：必須執行首次部署，將自動建立 `yuecommunity` 資料庫及 12 個資料表
 
 #### 2. 測試資料生成腳本
 - **檔案位置**：`scripts/generate-data.js`

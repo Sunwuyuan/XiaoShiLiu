@@ -1,10 +1,10 @@
-# 小石榴圖文社區 API 接口文檔
+﻿# 悦社圖文社區 API 接口文檔
 
 ## 專案資訊
-- **專案名稱**: 小石榴圖文社區
+- **專案名稱**: 悦社圖文社區
 - **版本**: v1.3.2
 - **基礎URL**: `http://localhost:3001`
-- **數據庫**: xiaoshiliu (MySQL)
+- **數據庫**: yuecommunity (MySQL)
 - **更新時間**: 2026-02-27
 
 ## 通用說明
@@ -77,7 +77,7 @@ Authorization: Bearer <your_jwt_token>
     "user": {
       "id": 1,
       "user_id": "user_001",
-      "nickname": "小石榴",
+      "nickname": "悦社",
       "avatar": "https://example.com/avatar.jpg",
       "bio": "这是個人簡介",
       "location": "北京",
@@ -98,7 +98,7 @@ Authorization: Bearer <your_jwt_token>
 **請求參數**:
 | 參數 | 型別 | 必填 | 說明 |
 |------|------|------|------|
-| user_id | string | 是 | 小石榴號 |
+| user_id | string | 是 | 悦社號 |
 | password | string | 是 | 密碼 |
 
 **響應範例**:
@@ -109,8 +109,8 @@ Authorization: Bearer <your_jwt_token>
   "data": {
     "user": {
       "id": 1,
-      "user_id": "xiaoshiliu123",
-      "nickname": "小石榴用户",
+      "user_id": "yuecommunity123",
+      "nickname": "悦社用户",
       "avatar": "http://example.com/avatar.jpg",
       "bio": "這是我的個人簡介",
       "location": "北京",
@@ -173,7 +173,7 @@ Authorization: Bearer <your_jwt_token>
   "data": {
     "id": 1,
     "user_id": "user_001",
-    "nickname": "小石榴",
+    "nickname": "悦社",
     "avatar": "https://example.com/avatar.jpg",
     "bio": "這是個人簡介",
     "location": "北京",
@@ -281,7 +281,7 @@ Authorization: Bearer <your_jwt_token>
   "code": 200,
   "message": "驗證碼發送成功，請查收郵箱",
   "data": {
-    "user_id": "xiaoshiliu"
+    "user_id": "yuecommunity"
   }
 }
 ```
@@ -348,7 +348,7 @@ Authorization: Bearer <your_jwt_token>
       {
         "id": 1,
         "user_id": "user_001",
-        "nickname": "小石榴",
+        "nickname": "悦社",
         "avatar": "https://example.com/avatar.jpg",
         "bio": "這是個人簡介",
         "location": "北京",
@@ -385,7 +385,7 @@ Authorization: Bearer <your_jwt_token>
   "data": {
     "id": 1,
     "user_id": "user_001",
-    "nickname": "小石榴",
+    "nickname": "悦社",
     "avatar": "https://example.com/avatar.jpg",
     "bio": "這是個人簡介",
     "location": "北京",
@@ -538,7 +538,7 @@ Authorization: Bearer <your_jwt_token>
 **請求參數**:
 | 參數 | 類型 | 必填 | 說明 |
 |------|------|------|------|
-| keyword | string | 是 | 搜尋關鍵詞（支持昵稱和小石榴號搜尋） |
+| keyword | string | 是 | 搜尋關鍵詞（支持昵稱和悦社號搜尋） |
 | page | int | 否 | 頁碼，默認1 |
 | limit | int | 否 | 每頁數量，默認20 |
 
@@ -556,7 +556,7 @@ Authorization: Bearer <your_jwt_token>
         "user": {
           "id": 1,
           "user_id": "user_001",
-          "nickname": "小石榴",
+          "nickname": "悦社",
           "avatar": "https://example.com/avatar.jpg",
           "verified": 0
         },
@@ -1050,7 +1050,7 @@ Authorization: Bearer <your_jwt_token>
         "comment_count": 5,
         "collect_count": 3,
         "created_at": "2025-08-30T00:00:00.000Z",
-        "nickname": "小石榴",
+        "nickname": "悦社",
         "user_avatar": "https://example.com/avatar.jpg",
         "verified": 0,
         "images": [
@@ -1180,7 +1180,7 @@ Authorization: Bearer <your_jwt_token>
         "user": {
           "id": 1,
           "user_id": "user_001",
-          "nickname": "小石榴",
+          "nickname": "悦社",
           "avatar": "https://example.com/avatar.jpg",
           "verified": 0
         }
@@ -2595,7 +2595,7 @@ async function example() {
 |------|------|------|------|
 | page | int | 否 | 頁碼，默認1 |
 | limit | int | 否 | 每頁數量，默認20 |
-| user_display_id | string | 否 | 小石榴號搜索 |
+| user_display_id | string | 否 | 悦社號搜索 |
 | nickname | string | 否 | 昵稱搜索 |
 | status | int | 否 | 狀態過濾（1=活躍，0=禁用） |
 | sortField | string | 否 | 排序字段（id, fans_count, like_count, created_at） |
@@ -2644,7 +2644,7 @@ async function example() {
 | page | int | 否 | 頁碼，默認1 |
 | limit | int | 否 | 每頁數量，默認20 |
 | title | string | 否 | 标題搜索 |
-| user_display_id | string | 否 | 作者小石榴號過濾 |
+| user_display_id | string | 否 | 作者悦社號過濾 |
 | category_id | int | 否 | 分類ID過濾 |
 | sortField | string | 否 | 排序字段（id, view_count, like_count, collect_count, comment_count, created_at） |
 | sortOrder | string | 否 | 排序方向（ASC, DESC） |
@@ -2688,7 +2688,7 @@ async function example() {
 | page | int | 否 | 頁碼，默認1 |
 | limit | int | 否 | 每頁數量，默認20 |
 | keyword | string | 否 | 搜索關鍵詞（標題或內容） |
-| user_display_id | string | 否 | 按作者小石榴號過濾 |
+| user_display_id | string | 否 | 按作者悦社號過濾 |
 | category_id | int/string | 否 | 分類ID過濾，傳"null"過濾未分類記錄 |
 
 **響應數據**:
@@ -2700,7 +2700,7 @@ async function example() {
 | type | int | 記錄類型：1-圖文，2-視頻 |
 | category | string | 分類名稱 |
 | status | int | 記錄狀態：2-待審核 |
-| user_display_id | string | 作者小石榴號 |
+| user_display_id | string | 作者悦社號 |
 | nickname | string | 作者昵稱 |
 | tags | array | 標籤清單 |
 | images | array | 圖片URL清單 |
@@ -2749,7 +2749,7 @@ async function example() {
 | page | int | 否 | 頁碼，默認1 |
 | limit | int | 否 | 每頁數量，默認20 |
 | content | string | 否 | 內容搜索 |
-| user_display_id | string | 否 | 評論者小石榴號過濾 |
+| user_display_id | string | 否 | 評論者悦社號過濾 |
 | post_id | int | 否 | 記錄ID過濾 |
 | sortField | string | 否 | 排序字段（id, like_count, created_at） |
 | sortOrder | string | 否 | 排序方向（ASC, DESC） |
@@ -2859,7 +2859,7 @@ async function example() {
 | limit | int | 否 | 每頁數量，默認20 |
 | type | int | 否 | 證書類型篩選（1-個人證書，2-企業證書） |
 | status | int | 否 | 审核狀態篩選（0-待審核，1-已通過，2-已拒絕） |
-| user_display_id | string | 否 | 用戶小石榴號搜索 |
+| user_display_id | string | 否 | 用戶悦社號搜索 |
 | real_name | string | 否 | 真實姓名搜索 |
 | 排序欄位 | 字串 | 否 | 排序欄位（id, created_at, audit_time） |
 | 排序順序 | 字串 | 否 | 排序順序（ASC, DESC） |
@@ -3008,7 +3008,7 @@ async function example() {
 |------|------|------|------|
 | page | int | 否 | 頁碼，預設1 |
 | limit | int | 否 | 每頁數量，預設20 |
-| user_display_id | string | 否 | 使用者小石榴號過濾 |
+| user_display_id | string | 否 | 使用者悦社號過濾 |
 | target_type | int | 否 | 目標類型（1=筆記，2=評論） |
 | sortField | string | 否 | 排序字段（id, user_id, created_at） |
 | sortOrder | string | 否 | 排序方向（ASC, DESC） |
@@ -3061,7 +3061,7 @@ async function example() {
 |------|------|------|------|
 | page | int | 否 | 頁碼，預設1 |
 | limit | int | 否 | 每頁數量，預設20 |
-| user_display_id | string | 否 | 使用者小石榴號過濾 |
+| user_display_id | string | 否 | 使用者悦社號過濾 |
 | sortBy | string | 否 | 排序字段（id, user_id, created_at） |
 | sortOrder | string | 否 | 排序方向（ASC, DESC） |
 
@@ -3088,7 +3088,7 @@ async function example() {
 |------|------|------|------|
 | page | int | 否 | 頁碼，預設1 |
 | limit | int | 否 | 每頁數量，預設20 |
-| user_display_id | string | 否 | 使用者小石榴號過濾 |
+| user_display_id | string | 否 | 使用者悦社號過濾 |
 | sortField | string | 否 | 排序字段（id, follower_id, following_id, created_at） |
 | sortOrder | string | 否 | 排序方向（ASC, DESC） |
 
@@ -3117,7 +3117,7 @@ async function example() {
 |------|----------|------|------|
 | page | int | 否 | 頁碼，默認1 |
 | limit | int | 否 | 每頁數量，默認20 |
-| user_display_id | string | 否 | 使用者小石榴號篩選 |
+| user_display_id | string | 否 | 使用者悦社號篩選 |
 | type | string | 否 | 通知類型篩選 |
 | is_read | int | 否 | 已讀狀態（0=未讀，1=已讀） |
 | sortField | string | 否 | 排序字段（id, created_at） |
@@ -3150,7 +3150,7 @@ async function example() {
 |------|----------|------|------|
 | page | int | 否 | 頁碼，默認1 |
 | limit | int | 否 | 每頁數量，默認20 |
-| user_display_id | string | 否 | 使用者小石榴號篩選 |
+| user_display_id | string | 否 | 使用者悦社號篩選 |
 | is_active | int | 否 | 活躍狀態（0=非活躍，1=活躍） |
 | sortField | string | 否 | 排序字段（id, is_active, expires_at, created_at） |
 | sortOrder | string | 否 | 排序方向（ASC, DESC） |

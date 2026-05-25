@@ -1,10 +1,10 @@
-<template>
+﻿<template>
   <div class="admin-login-page">
     <div class="login-container">
       <div class="login-card">
 
         <div class="login-header">
-          <h1 class="login-title">小石榴管理后台</h1>
+          <h1 class="login-title">悦社管理后台</h1>
         </div>
 
 

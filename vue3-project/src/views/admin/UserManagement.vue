@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div>
     <CrudTable title="用户管理" entity-name="用户" api-endpoint="/admin/users" :columns="columns" :form-fields="formFields"
       :search-fields="searchFields" default-sort-field="id" default-sort-order="asc" :custom-actions="customActions"
@@ -57,7 +57,7 @@ const currentBanInfo = ref(null)
 
 const columns = [
   { key: 'id', label: 'ID', sortable: true },
-  { key: 'user_id', label: '小石榴号', type: 'user-link', sortable: false, maxLength: 15 },
+  { key: 'user_id', label: '悦社号', type: 'user-link', sortable: false, maxLength: 15 },
   { key: 'nickname', label: '用户昵称', sortable: false },
   { key: 'avatar', label: '头像', type: 'image', sortable: false },
   { key: 'bio', label: '简介', type: 'content', sortable: false },
@@ -113,7 +113,7 @@ const banFormFields = [
 
 // 通用用户表单字段
 const userFormFields = [
-  { key: 'user_id', label: '小石榴号', type: 'text', required: true, placeholder: '请输入小石榴号', maxlength: 15 },
+  { key: 'user_id', label: '悦社号', type: 'text', required: true, placeholder: '请输入悦社号', maxlength: 15 },
   { key: 'nickname', label: '昵称', type: 'text', required: true, placeholder: '请输入昵称', maxlength: 10 },
   { key: 'avatar', label: '头像', type: 'avatar-upload', placeholder: '上传头像' },
   { key: 'avatar', label: '头像URL', type: 'text', placeholder: '请输入头像URL或使用上方上传功能' },
@@ -359,7 +359,7 @@ const handleBanSubmit = async (formData) => {
 const formFields = userFormFields
 
 const searchFields = [
-  { key: 'user_id', label: '小石榴号', placeholder: '搜索小石榴号' },
+  { key: 'user_id', label: '悦社号', placeholder: '搜索悦社号' },
   { key: 'nickname', label: '昵称', placeholder: '搜索昵称' },
   { key: 'location', label: '属地', placeholder: '搜索属地' },
   {

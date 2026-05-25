@@ -1,6 +1,6 @@
-# 小石榴 - Logto 统一认证集成指南
+﻿# 悦社 - Logto 统一认证集成指南
 
-本文档介绍如何为小石榴项目配置和使用 Logto 统一认证系统。
+本文档介绍如何为悦社项目配置和使用 Logto 统一认证系统。
 
 ## 目录
 
@@ -60,7 +60,7 @@ LOGTO_COOKIE_SECRET=your-secret-key-here  # 可选，自动生成
 执行以下 SQL 为用户表添加 `logto_id` 字段：
 
 ```sql
-USE xiaoshiliu;
+USE yuecommunity;
 
 -- 添加 logto_id 字段
 ALTER TABLE users 
@@ -77,7 +77,7 @@ ADD UNIQUE KEY IF NOT EXISTS idx_logto_id (logto_id);
 或者直接运行提供的迁移脚本：
 
 ```bash
-mysql -u root -p xiaoshiliu < express-project/scripts/add-logto-column.sql
+mysql -u root -p yuecommunity < express-project/scripts/add-logto-column.sql
 ```
 
 ### 4. 启动后端服务
@@ -148,7 +148,7 @@ npm run dev
 
 本项目支持**混合认证模式**：
 
-- **传统方式**：用户可以继续使用原有的小石榴号/密码登录
+- **传统方式**：用户可以继续使用原有的悦社号/密码登录
 - **Logto 方式**：用户可以选择使用 Logto 统一认证登录
 
 两种方式共享同一用户系统，通过 `logto_id` 关联。

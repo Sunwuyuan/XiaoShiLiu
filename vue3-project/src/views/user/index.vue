@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { ref, computed, onMounted, nextTick, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScroll, useWindowSize } from '@vueuse/core'
@@ -320,7 +320,7 @@ function handleCollect(data) {
             <VerifiedBadge v-if="userStore.userInfo?.verified" :verified="userStore.userInfo.verified" size="large"/>
           </div>
           <div class="user-content">
-            <div class="user-id text-ellipsis">小石榴号：{{ userStore.userInfo?.user_id || '' }}</div>
+            <div class="user-id text-ellipsis">悦社号：{{ userStore.userInfo?.user_id || '' }}</div>
             <div class="user-IP text-ellipsis">IP属地：{{ userStore.userInfo?.location || '未知' }}</div>
           </div>
         </div>

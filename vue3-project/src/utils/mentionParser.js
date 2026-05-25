@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Mention文本解析工具
  * 将[@nickname:user_id]格式的文本转换为可点击的超链接
  */
@@ -67,7 +67,7 @@ export function parseMentions(text) {
     // 转义昵称和用户ID，防止XSS攻击
     const escapedNickname = escapeMentionNickname(nickname)
     const escapedUserId = escapeHtml(userId)
-    // 生成用户主页链接，使用小石榴号作为路由参数
+    // 生成用户主页链接，使用悦社号作为路由参数
     return `<a href="/user/${escapedUserId}" class="mention-link" data-user-id="${escapedUserId}" contenteditable="false">@${escapedNickname}</a>`
   })
 

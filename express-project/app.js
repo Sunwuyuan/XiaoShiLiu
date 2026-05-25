@@ -1,5 +1,6 @@
 /**
- * 小石榴校园图文社区 - Express后端服务
+ * 悦社动态社区 - Express后端服务
+ * 基于原项目小石榴校园图文社区修改
  * 
  * @author ZTMYO
  * @github https://github.com/ZTMYO

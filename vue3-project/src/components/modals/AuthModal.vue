@@ -8,7 +8,7 @@
 
       <div class="auth-content">
         <div class="auth-header">
-          <h2 class="auth-title">登录小石榴</h2>
+          <h2 class="auth-title">登录悦社</h2>
           <p class="auth-subtitle">欢迎回来！</p>
         </div>
 

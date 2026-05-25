@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div v-if="visible" class="mention-modal-overlay" v-click-outside.mousedown="closeMentionModal"
     v-escape-key="closeMentionModal">
     <div class="mention-modal" @mousedown.stop @wheel.stop>
@@ -226,7 +226,7 @@ const loadFriends = async (forceReload = false) => {
       try {
         const userResponse = await authApi.getCurrentUser()
         if (userResponse.success && userResponse.data) {
-          currentUserId.value = userResponse.data.user_id // 使用小石榴号而不是数字ID
+          currentUserId.value = userResponse.data.user_id // 使用悦社号而不是数字ID
         } else {
           // 如果获取失败，使用默认ID
           currentUserId.value = 1

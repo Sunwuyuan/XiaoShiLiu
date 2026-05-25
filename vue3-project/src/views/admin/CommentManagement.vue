@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <CrudTable title="评论管理" entity-name="评论" api-endpoint="/admin/comments" :columns="columns" :form-fields="formFields"
     :search-fields="searchFields" />
 </template>
@@ -10,7 +10,7 @@ const columns = [
   { key: 'id', label: 'ID', type: 'comment-link', sortable: true },
   { key: 'content', label: '内容', type: 'content', sortable: false },
   { key: 'user_id', label: '评论者ID', sortable: false },
-  { key: 'user_display_id', label: '评论者小石榴号', type: 'user-link', sortable: false },
+  { key: 'user_display_id', label: '评论者悦社号', type: 'user-link', sortable: false },
   { key: 'post_id', label: '笔记ID', sortable: false },
   { key: 'parent_id', label: '父评论ID', sortable: false },
   { key: 'like_count', label: '点赞数', sortable: true },
@@ -25,7 +25,7 @@ const formFields = [
 
 const searchFields = [
   { key: 'post_id', label: '笔记ID', placeholder: '搜索笔记ID' },
-  { key: 'user_display_id', label: '小石榴号', placeholder: '搜索用户小石榴号' },
+  { key: 'user_display_id', label: '悦社号', placeholder: '搜索用户悦社号' },
   { key: 'content', label: '内容', placeholder: '搜索评论内容' }
 ]
 </script>

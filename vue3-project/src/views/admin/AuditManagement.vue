@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <CrudTable title="认证管理" entity-name="认证申请" api-endpoint="/admin/audit" :columns="columns" :form-fields="formFields"
     :search-fields="searchFields" :custom-actions="customActions" @custom-action="handleCustomAction" />
 
@@ -82,7 +82,7 @@ const getAuthHeaders = () => {
 // 表格列定义
 const columns = [
   { key: 'id', label: 'ID', sortable: true },
-  { key: 'user_display_id', label: '用户小石榴号', type: 'user-link', sortable: false },
+  { key: 'user_display_id', label: '用户悦社号', type: 'user-link', sortable: false },
   { key: 'nickname', label: '用户昵称', sortable: false },
   {
     key: 'content',
@@ -188,7 +188,7 @@ const formFields = computed(() => [
 
 // 搜索字段定义
 const searchFields = [
-  { key: 'user_display_id', label: '用户小石榴号', placeholder: '搜索用户小石榴号' },
+  { key: 'user_display_id', label: '用户悦社号', placeholder: '搜索用户悦社号' },
   {
     key: 'type',
     label: '认证类型',

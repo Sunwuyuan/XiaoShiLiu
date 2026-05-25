@@ -5,9 +5,9 @@
       <div class="about-header">
         <div class="header-content">
           <div class="logo-section">
-            <div class="about-logo"><img :src="logoUrl" alt="小石榴" /></div>
+            <div class="about-logo"><img :src="logoUrl" alt="悦社" /></div>
 
-            <h2 class="about-title">关于小石榴</h2>
+            <h2 class="about-title">关于悦社</h2>
           </div>
           <p class="version">v1.3.2</p>
         </div>
@@ -21,7 +21,7 @@
           <div class="intro-section">
             <h3>项目简介</h3>
             <p>
-              小石榴校园图文社区是一个面向开发者与学习者的开源示例项目，旨在提供从前端到后端的完整实践范本，帮助大家学习现代 Web 应用的架构设计、工程化与业务实现。
+              悦社动态社区是一个面向开发者与学习者的开源示例项目，基于原项目小石榴校园图文社区修改而来，旨在提供从前端到后端的完整实践范本，帮助大家学习现代 Web 应用的架构设计、工程化与业务实现。
             </p>
           </div>
           <div class="author-section">
@@ -105,7 +105,7 @@
           </div>
 
           <div class="about-footer">
-            <p>&copy; 2025 小石榴校园图文社区. Made with ❤️ by @ZTMYO</p>
+            <p>&copy; 2025 悦社动态社区. 基于原项目小石榴校园图文社区. Made with ❤️ by @ZTMYO</p>
           </div>
         </div>
       </div>

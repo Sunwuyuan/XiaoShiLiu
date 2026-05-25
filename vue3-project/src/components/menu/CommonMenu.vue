@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import DropdownItem from '@/components/menu/DropdownItem.vue'
 import DropdownDivider from '@/components/menu/DropdownDivider.vue'
 import ThemeSwitcherMenuItem from '@/components/menu/ThemeSwitcherMenuItem.vue'
@@ -49,7 +49,7 @@ const handleMenuClick = (action) => {
 <template>
 
   <DropdownItem @click="handleMenuClick('about')">
-    关于小石榴
+    关于悦社
   </DropdownItem>
   <DropdownItem @click="handleMenuClick('keyboardShortcuts')">
     键盘快捷键

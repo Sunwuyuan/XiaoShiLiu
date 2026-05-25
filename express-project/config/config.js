@@ -1,5 +1,5 @@
-/**
- * 小石榴校园图文社区 - 应用配置文件
+﻿/**
+ * 悦社动态社区 - 应用配置文件
  * 集中管理所有配置项
  * 
  * @author ZTMYO
@@ -38,7 +38,7 @@ const config = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '123456',
-    database: process.env.DB_NAME || 'xiaoshiliu',
+    database: process.env.DB_NAME || 'yuecommunity',
     port: process.env.DB_PORT || 3306,
     charset: 'utf8mb4',
     timezone: '+08:00'
@@ -131,7 +131,7 @@ const config = {
     // 发件人配置
     from: {
       email: process.env.EMAIL_FROM || '',
-      name: process.env.EMAIL_FROM_NAME || '小石榴校园图文社区'
+      name: process.env.EMAIL_FROM_NAME || '悦社动态社区'
     }
   },
 
