@@ -37,10 +37,4 @@ SET @column_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
 SET @sql = IF(@column_exists = 0, 'ALTER TABLE admin ADD COLUMN nickname VARCHAR(100) DEFAULT NULL COMMENT ''昵称''', 'SELECT ''nickname 列已存在'' as status');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 7. 添加 avatar 字段
-SET @column_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin' AND COLUMN_NAME = 'avatar');
-SET @sql = IF(@column_exists = 0, 'ALTER TABLE admin ADD COLUMN avatar VARCHAR(500) DEFAULT NULL COMMENT ''头像''', 'SELECT ''avatar 列已存在'' as status');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
 SELECT '所有迁移完成！' as '状态';

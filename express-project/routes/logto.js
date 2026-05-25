@@ -588,8 +588,7 @@ router.post('/admin/callback', async (req, res) => {
         admin: {
           id: admin.id,
           username: admin.username,
-          nickname: admin.nickname || nickname,
-          avatar: admin.avatar || avatar,
+          nickname: admin.nickname || logtoUser.name || logtoUser.nickname || '管理员',
           isSuper,
           permissions
         },

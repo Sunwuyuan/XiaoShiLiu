@@ -878,7 +878,7 @@ router.get('/admin/me', authenticateToken, async (req, res) => {
     const adminId = req.user.adminId;
 
     const [adminRows] = await pool.execute(
-      'SELECT id, username, nickname, avatar, is_super, permissions, logto_id FROM admin WHERE id = ?',
+      'SELECT id, username, nickname, is_super, permissions, logto_id FROM admin WHERE id = ?',
       [adminId.toString()]
     );
 
@@ -903,7 +903,6 @@ router.get('/admin/me', authenticateToken, async (req, res) => {
         id: admin.id,
         username: admin.username,
         nickname: admin.nickname,
-        avatar: admin.avatar,
         isSuper: admin.is_super === 1,
         permissions,
         logtoId: admin.logto_id
@@ -948,7 +947,7 @@ router.get('/admin/admins', authenticateToken, async (req, res) => {
 
     // 查询管理员列表
     const dataQuery = `
-      SELECT id, username, nickname, avatar, is_super, permissions, logto_id, created_at 
+      SELECT id, username, nickname, is_super, permissions, logto_id, created_at 
       FROM admin 
       ${whereClause}
       ORDER BY ${sortField} ${sortOrder} 
@@ -970,7 +969,6 @@ router.get('/admin/admins', authenticateToken, async (req, res) => {
         id: admin.id,
         username: admin.username,
         nickname: admin.nickname,
-        avatar: admin.avatar,
         isSuper: admin.is_super === 1,
         permissions,
         logtoId: admin.logto_id,
