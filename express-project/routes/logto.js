@@ -27,7 +27,7 @@ async function checkLogtoColumnExists() {
   }
 }
 
-// 获取 Logto Token
+// 获取 Logto Token（用户登录）
 async function getLogtoToken(code) {
   const tokenUrl = `${LOGTO_CONFIG.endpoint}/oidc/token`;
   
@@ -53,6 +53,31 @@ async function getLogtoToken(code) {
     expiresIn: response.data.expires_in
   });
 
+  return response.data;
+}
+
+// 获取 Logto Token（管理员登录）
+async function getLogtoAdminToken(code) {
+  const tokenUrl = `${LOGTO_CONFIG.endpoint}/oidc/token`;
+  
+  const params = new URLSearchParams();
+  params.append('grant_type', 'authorization_code');
+  params.append('code', code);
+  params.append('redirect_uri', config.logto.adminRedirectUri);
+  params.append('client_id', LOGTO_CONFIG.appId);
+  params.append('client_secret', LOGTO_CONFIG.appSecret);
+
+  console.log('正在请求 Logto 管理员 Token...');
+  console.log('Token URL:', tokenUrl);
+  console.log('Redirect URI:', config.logto.adminRedirectUri);
+  
+  const response = await axios.post(tokenUrl, params, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+
+  console.log('管理员 Token 请求成功');
   return response.data;
 }
 
@@ -502,8 +527,9 @@ router.post('/admin/callback', async (req, res) => {
     }
 
     console.log('处理 Logto 管理员回调，code:', code);
+    console.log('使用的 Redirect URI:', config.logto.adminRedirectUri);
     
-    const tokenData = await getLogtoToken(code);
+    const tokenData = await getLogtoAdminToken(code);
     
     const logtoUser = await getLogtoUserInfo(tokenData.access_token);
     
