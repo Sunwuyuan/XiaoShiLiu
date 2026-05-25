@@ -47,11 +47,27 @@ async function authenticateToken(req, res, next) {
         });
       }
 
+      // 获取管理员权限
+      const admin = adminRows[0];
+      let adminPermissions = [];
+      let isSuper = admin.is_super === 1;
+      if (admin.permissions) {
+        try {
+          adminPermissions = typeof admin.permissions === 'string' 
+            ? JSON.parse(admin.permissions) 
+            : admin.permissions;
+        } catch (e) {
+          adminPermissions = [];
+        }
+      }
+
       // 将管理员信息添加到请求对象
       req.user = {
-        ...adminRows[0],
+        ...admin,
         type: 'admin',
-        adminId: decoded.adminId
+        adminId: decoded.adminId,
+        adminPermissions,
+        isSuper
       };
       req.token = token;
 

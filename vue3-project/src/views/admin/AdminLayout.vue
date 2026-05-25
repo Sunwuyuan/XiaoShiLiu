@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="admin-layout">
     <template v-if="localLoginSuccess">
       <div class="sidebar" :class="{ collapsed: isCollapsed, expanded: isExpanded }" @mouseenter="handleMouseEnter"
@@ -21,6 +21,19 @@
 
 
         <div class="sidebar-footer">
+          <!-- 管理员信息 -->
+          <div v-if="adminStore.admin" class="admin-info-section">
+            <div class="admin-avatar-placeholder">
+              {{ adminStore.admin.nickname?.charAt(0) || 'A' }}
+            </div>
+            <div v-if="isExpanded || !isCollapsed" class="admin-details">
+              <div class="admin-name">{{ adminStore.admin.nickname || adminStore.admin.username }}</div>
+              <div class="admin-role-badge" :class="{ 'super': adminStore.isSuperAdmin }">
+                {{ adminStore.isSuperAdmin ? '超级管理员' : '管理员' }}
+              </div>
+            </div>
+          </div>
+          
           <div v-if="isExpanded || !isCollapsed">
             <div class="theme-switcher-content">
               <div class="admin-theme-toggle">
@@ -264,24 +277,32 @@ watch(isFilterOpen, (newValue) => {
 })
 
 // 菜单项
-const menuItems = [
-  { path: '/admin/api-docs', title: 'API文档', icon: 'data' },
-  { path: '/admin/monitor', title: '动态监控', icon: 'monitor' },
-  { path: '/admin/users', title: '用户管理', icon: 'user' },
-  { path: '/admin/posts', title: '笔记管理', icon: 'post' },
-  { path: '/admin/post-audit', title: '笔记审核', icon: 'audit' },
-  { path: '/admin/comments', title: '评论管理', icon: 'chat' },
-  { path: '/admin/categories', title: '分类管理', icon: 'category' },
-  { path: '/admin/tags', title: '标签管理', icon: 'hash' },
-  { path: '/admin/likes', title: '点赞管理', icon: 'like' },
-  { path: '/admin/collections', title: '收藏管理', icon: 'collect' },
-  { path: '/admin/follows', title: '关注管理', icon: 'follow' },
-  { path: '/admin/notifications', title: '通知管理', icon: 'notification' },
-  { path: '/admin/sessions', title: '用户会话管理', icon: 'setting' },
-  { path: '/admin/admin-sessions', title: '管理员会话管理', icon: 'setting' },
-  { path: '/admin/audit', title: '认证管理', icon: 'verified' },
-  { path: '/admin/admins', title: '管理员管理', icon: 'admin' }
-]
+const menuItems = computed(() => {
+  const items = [
+    { path: '/admin/api-docs', title: 'API文档', icon: 'data' },
+    { path: '/admin/monitor', title: '动态监控', icon: 'monitor' },
+    { path: '/admin/users', title: '用户管理', icon: 'user' },
+    { path: '/admin/posts', title: '笔记管理', icon: 'post' },
+    { path: '/admin/post-audit', title: '笔记审核', icon: 'audit' },
+    { path: '/admin/comments', title: '评论管理', icon: 'chat' },
+    { path: '/admin/categories', title: '分类管理', icon: 'category' },
+    { path: '/admin/tags', title: '标签管理', icon: 'hash' },
+    { path: '/admin/likes', title: '点赞管理', icon: 'like' },
+    { path: '/admin/collections', title: '收藏管理', icon: 'collect' },
+    { path: '/admin/follows', title: '关注管理', icon: 'follow' },
+    { path: '/admin/notifications', title: '通知管理', icon: 'notification' },
+    { path: '/admin/sessions', title: '用户会话管理', icon: 'setting' },
+    { path: '/admin/admin-sessions', title: '管理员会话管理', icon: 'setting' },
+    { path: '/admin/audit', title: '认证管理', icon: 'verified' },
+  ]
+  
+  // 只有超级管理员才能看到管理员管理菜单
+  if (adminStore.isSuperAdmin) {
+    items.push({ path: '/admin/admins', title: '管理员管理', icon: 'admin' })
+  }
+  
+  return items
+})
 
 // 当前页面标题
 const currentPageTitle = computed(() => {
@@ -487,9 +508,66 @@ const goBack = () => {
 .sidebar-footer {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
   background-color: var(--bg-color-primary);
   border-top: 1px solid var(--border-color-primary);
+}
+
+.admin-info-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background-color: var(--bg-color-secondary);
+}
+
+.sidebar.collapsed .admin-info-section {
+  justify-content: center;
+  padding: 16px 12px;
+}
+
+.admin-avatar-placeholder {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.admin-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-role-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 4px;
+  background-color: var(--bg-color-tertiary);
+  color: var(--text-color-secondary);
+}
+
+.admin-role-badge.super {
+  background-color: var(--primary-color);
+  color: white;
 }
 
 .theme-switcher-content {

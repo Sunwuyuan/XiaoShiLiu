@@ -4,6 +4,7 @@ const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
 const { pool, email: emailConfig } = require('../config/config');
 const { generateAccessToken, generateRefreshToken, verifyToken } = require('../utils/jwt');
 const { authenticateToken } = require('../middleware/auth');
+const { checkPermission } = require('../middleware/permission');
 const { getIPLocation, getRealIP } = require('../utils/ipLocation');
 const { sendEmailCode } = require('../utils/email');
 const svgCaptcha = require('svg-captcha');
@@ -917,9 +918,12 @@ router.get('/admin/me', authenticateToken, async (req, res) => {
 // 获取管理员列表
 router.get('/admin/admins', authenticateToken, async (req, res) => {
   try {
-    // 检查是否为管理员token
-    if (!req.user.type || req.user.type !== 'admin') {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '权限不足' });
+    // 权限检查
+    if (!checkPermission(req.user.adminPermissions, 'admins:view', req.user.isSuper)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({ 
+        code: RESPONSE_CODES.FORBIDDEN, 
+        message: '无权限查看管理员列表' 
+      });
     }
 
     const page = parseInt(req.query.page) || 1;
@@ -998,8 +1002,12 @@ router.get('/admin/admins', authenticateToken, async (req, res) => {
 // 创建管理员
 router.post('/admin/admins', authenticateToken, async (req, res) => {
   try {
-    if (!req.user.type || req.user.type !== 'admin') {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '权限不足' });
+    // 权限检查 - 需要创建管理员权限
+    if (!checkPermission(req.user.adminPermissions, 'admins:create', req.user.isSuper)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({ 
+        code: RESPONSE_CODES.FORBIDDEN, 
+        message: '无权限创建管理员' 
+      });
     }
 
     const { username, nickname, permissions, isSuper } = req.body;
@@ -1040,8 +1048,12 @@ router.post('/admin/admins', authenticateToken, async (req, res) => {
 // 更新管理员信息
 router.put('/admin/admins/:id', authenticateToken, async (req, res) => {
   try {
-    if (!req.user.type || req.user.type !== 'admin') {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '权限不足' });
+    // 权限检查 - 需要编辑管理员权限
+    if (!checkPermission(req.user.adminPermissions, 'admins:edit', req.user.isSuper)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({ 
+        code: RESPONSE_CODES.FORBIDDEN, 
+        message: '无权限编辑管理员' 
+      });
     }
 
     const adminId = req.params.id;
@@ -1095,9 +1107,12 @@ router.put('/admin/admins/:id', authenticateToken, async (req, res) => {
 // 删除管理员
 router.delete('/admin/admins/:id', authenticateToken, async (req, res) => {
   try {
-    // 检查是否为管理员token
-    if (!req.user.type || req.user.type !== 'admin') {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '权限不足' });
+    // 权限检查 - 需要删除管理员权限
+    if (!checkPermission(req.user.adminPermissions, 'admins:delete', req.user.isSuper)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({ 
+        code: RESPONSE_CODES.FORBIDDEN, 
+        message: '无权限删除管理员' 
+      });
     }
 
     const adminId = req.params.id;
