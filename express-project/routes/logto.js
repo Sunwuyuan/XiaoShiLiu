@@ -552,8 +552,16 @@ router.post('/admin/callback', async (req, res) => {
     }
     
     // 生成管理员 JWT 令牌
-    const accessToken = generateAccessToken({ adminId: admin.id, username: admin.username });
-    const refreshToken = generateRefreshToken({ adminId: admin.id, username: admin.username });
+    const accessToken = generateAccessToken({ 
+      adminId: admin.id, 
+      username: admin.username, 
+      type: 'admin' 
+    });
+    const refreshToken = generateRefreshToken({ 
+      adminId: admin.id, 
+      username: admin.username, 
+      type: 'admin' 
+    });
     
     // 清除旧会话并保存新会话
     await pool.execute('UPDATE admin_sessions SET is_active = 0 WHERE admin_id = ?', [admin.id.toString()]);
