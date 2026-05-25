@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <CrudTable title="认证管理" entity-name="认证申请" api-endpoint="/admin/audit" :columns="columns" :form-fields="formFields"
     :search-fields="searchFields" :custom-actions="customActions" @custom-action="handleCustomAction" />
 
@@ -46,7 +46,8 @@ const handleConfirmDelete = async () => {
   try {
     const response = await fetch(`${apiConfig.baseURL}/admin/audit/${selectedItem.value.id}`, {
       method: 'DELETE',
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     })
     const result = await response.json()
     if (result.code === 200) {
@@ -69,11 +70,6 @@ const handleConfirmDelete = async () => {
 const getAuthHeaders = () => {
   const headers = {
     'Content-Type': 'application/json'
-  }
-
-  const token = localStorage.getItem('admin_token')
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
   }
 
   return headers
@@ -228,7 +224,8 @@ const handleCustomAction = async ({ action, item }) => {
       // 审核通过
       const response = await fetch(`${apiConfig.baseURL}/admin/audit/${item.id}/approve`, {
         method: 'PUT',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        credentials: 'include'
       })
       const result = await response.json()
       if (result.code === 200) {
@@ -242,7 +239,8 @@ const handleCustomAction = async ({ action, item }) => {
       // 拒绝申请
       const response = await fetch(`${apiConfig.baseURL}/admin/audit/${item.id}/reject`, {
         method: 'PUT',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        credentials: 'include'
       })
       const result = await response.json()
       if (result.code === 200) {

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="crud-table">
 
     <div class="table-header">
@@ -386,12 +386,6 @@ const getAuthHeaders = () => {
     'Content-Type': 'application/json'
   }
 
-  // 统一使用JWT token认证
-  const adminToken = localStorage.getItem('admin_token')
-  if (adminToken) {
-    headers.Authorization = `Bearer ${adminToken}`
-  }
-
   return headers
 }
 
@@ -541,7 +535,8 @@ const loadData = async (targetPage = null, useCache = true) => {
 
     // 使用配置的API地址
     const response = await fetch(`${apiConfig.baseURL}${props.apiEndpoint}?${params}`, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     })
     const result = await response.json()
 
@@ -734,7 +729,8 @@ const editItem = async (item) => {
   if (props.apiEndpoint === '/admin/posts') {
     try {
       const response = await fetch(`${apiConfig.baseURL}${props.apiEndpoint}/${item.id}`, {
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        credentials: 'include'
       })
       const result = await response.json()
 
@@ -911,7 +907,8 @@ const deleteItem = async (item) => {
     try {
       const response = await fetch(`${apiConfig.baseURL}${props.apiEndpoint}/${item.id}`, {
         method: 'DELETE',
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        credentials: 'include'
       })
 
       const result = await response.json()
@@ -950,6 +947,7 @@ const submitForm = async (data) => {
     const response = await fetch(url, {
       method,
       headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify(data)
     })
 
@@ -1028,7 +1026,8 @@ const showImageGallery = async (postId) => {
   loadingGallery.value = postId
   try {
     const response = await fetch(`${apiConfig.baseURL}/admin/posts/${postId}`, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     })
     const result = await response.json()
 
@@ -1067,7 +1066,8 @@ const showMediaGallery = async (item) => {
     loadingGallery.value = item.id
     try {
       const response = await fetch(`${apiConfig.baseURL}/admin/posts/${item.id}`, {
-        headers: getAuthHeaders()
+        headers: getAuthHeaders(),
+        credentials: 'include'
       })
       const result = await response.json()
 
@@ -1117,7 +1117,8 @@ const showPersonalityTags = async (item) => {
   try {
     // 调用API获取个性标签数据
     const response = await fetch(`${apiConfig.baseURL}/users/${item.user_id}/personality-tags`, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     })
 
     if (response.ok) {
@@ -1251,6 +1252,7 @@ const batchDelete = async () => {
       const response = await fetch(`${apiConfig.baseURL}${props.apiEndpoint}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           ids: selectedItems.value
         })

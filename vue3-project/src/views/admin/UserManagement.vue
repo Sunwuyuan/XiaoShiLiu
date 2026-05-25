@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <CrudTable title="用户管理" entity-name="用户" api-endpoint="/admin/users" :columns="columns" :form-fields="formFields"
       :search-fields="searchFields" default-sort-field="id" default-sort-order="asc" :custom-actions="customActions"
@@ -186,14 +186,9 @@ const userFormFields = [
 const editFormFields = userFormFields.filter(field => field.key !== 'is_active')
 
 const getAuthHeaders = () => {
-  const headers = {
+  return {
     'Content-Type': 'application/json'
   }
-  const adminToken = localStorage.getItem('admin_token')
-  if (adminToken) {
-    headers.Authorization = `Bearer ${adminToken}`
-  }
-  return headers
 }
 
 // 通用API请求处理函数
@@ -203,6 +198,7 @@ const handleApiRequest = async (url, method, data = null, successMessage, errorM
     const response = await fetch(url, {
       method,
       headers: getAuthHeaders(),
+      credentials: 'include',
       body: data ? JSON.stringify(data) : null
     })
     const result = await response.json()

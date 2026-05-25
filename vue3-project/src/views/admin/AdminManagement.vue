@@ -320,19 +320,17 @@ const roles = [
 ]
 
 const getAuthHeaders = () => {
-  const headers = { 'Content-Type': 'application/json' }
-  const token = localStorage.getItem('admin_token')
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
+  return { 
+    'Content-Type': 'application/json'
   }
-  return headers
 }
 
 const loadAdmins = async () => {
   loading.value = true
   try {
     const response = await fetch(`${apiConfig.baseURL}/admin/admins`, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     })
     const result = await response.json()
     if (result.code === 200) {
@@ -402,6 +400,7 @@ const submitForm = async () => {
     const response = await fetch(url, {
       method,
       headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify({
         username: formData.value.username,
         logtoId: formData.value.logtoId || null,
@@ -432,6 +431,7 @@ const submitPermission = async () => {
     const response = await fetch(`${apiConfig.baseURL}/admin/admins/${permissionFormData.value.id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify({
         nickname: permissionFormData.value.nickname,
         isSuper: permissionFormData.value.isSuper,
@@ -467,7 +467,8 @@ const executeDelete = async () => {
   try {
     const response = await fetch(`${apiConfig.baseURL}/admin/admins/${deleteTarget.value.id}`, {
       method: 'DELETE',
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      credentials: 'include'
     })
 
     const result = await response.json()

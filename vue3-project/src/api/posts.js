@@ -88,9 +88,7 @@ export async function getPostList(params = {}) {
       if (type === 'collections') {
         // 获取用户收藏的笔记
         response = await fetch(`${apiConfig.baseURL}/users/${userId}/collections?page=${page}&limit=${limit}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
+          credentials: 'include'
         }).then(res => res.json())
 
         if (response && response.code === 200 && response.data && response.data.collections) {
@@ -103,9 +101,7 @@ export async function getPostList(params = {}) {
       } else if (type === 'likes') {
         // 获取用户点赞的笔记
         response = await fetch(`${apiConfig.baseURL}/users/${userId}/likes?page=${page}&limit=${limit}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
+          credentials: 'include'
         }).then(res => res.json())
 
         if (response && response.code === 200 && response.data && response.data.posts) {
@@ -142,9 +138,7 @@ export async function getPostList(params = {}) {
         }
 
         response = await fetch(`${apiConfig.baseURL}/users/${userId}/posts?${searchParams.toString()}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
+          credentials: 'include'
         }).then(res => res.json())
 
         if (response && response.code === 200 && response.data && response.data.posts) {
@@ -172,9 +166,7 @@ export async function getPostList(params = {}) {
       }
 
       response = await fetch(`${apiConfig.baseURL}/search?${searchParams.toString()}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+        credentials: 'include'
       }).then(res => res.json())
 
       // 适配新的搜索API返回格式 - posts模式返回笔记数据

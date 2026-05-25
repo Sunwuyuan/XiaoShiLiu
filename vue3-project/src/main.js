@@ -42,10 +42,14 @@ app.use(messageInstall) // 注册消息管理器
 const userStore = useUserStore()
 // 先从localStorage恢复用户信息
 userStore.initUserInfo()
-// 如果有token，则获取最新的用户信息
-if (userStore.token) {
+// 如果有已保存的用户信息，尝试验证会话是否有效
+if (userStore.isLoggedIn) {
   userStore.getCurrentUser().catch(error => {
-    console.error('获取用户信息失败:', error)
+    console.error('验证用户会话失败:', error)
+    // 如果会话无效，清除本地数据
+    if (error.response?.status === 401) {
+      userStore.logout()
+    }
   })
 }
 

@@ -104,9 +104,9 @@ const confirmDeleteAccount = async () => {
     const response = await fetch(`/api/users/${userStore.userInfo.user_id}`, {
       method: 'DELETE',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${userStore.token}`
-      }
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include'
     })
 
     if (response.ok) {

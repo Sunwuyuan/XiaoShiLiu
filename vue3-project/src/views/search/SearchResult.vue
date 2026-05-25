@@ -116,9 +116,7 @@ async function searchContent(type = 'all', page = 1, limit = 20) {
         }
 
         const response = await fetch(`${apiConfig.baseURL}/search?${params.toString()}`, {
-            headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-            }
+            credentials: 'include'
         }).then(res => res.json())
 
         // 竞态处理：如果不是最新的请求，直接丢弃结果

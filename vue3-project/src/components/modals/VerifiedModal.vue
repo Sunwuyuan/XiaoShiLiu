@@ -231,10 +231,9 @@ const showForm = computed(() => {
 const fetchVerificationStatus = async () => {
   try {
     statusLoading.value = true
+    // Cookie模式下，浏览器会自动发送认证信息，无需手动设置Authorization头
     const response = await fetch('/api/users/verification/status', {
-      headers: {
-        'Authorization': `Bearer ${userStore.token}`
-      }
+      credentials: 'include'  // 确保发送Cookie
     })
     const result = await response.json()
 
@@ -352,9 +351,9 @@ const handleSubmitVerification = async () => {
     const response = await fetch('/api/users/verification', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${userStore.token}`
+        'Content-Type': 'application/json'
       },
+      credentials: 'include',
       body: JSON.stringify(requestBody)
     })
 
@@ -402,9 +401,9 @@ const handleRevokeVerification = async () => {
     const response = await fetch('/api/users/verification/revoke', {
       method: 'DELETE',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${userStore.token}`
-      }
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include'
     })
 
     const result = await response.json()

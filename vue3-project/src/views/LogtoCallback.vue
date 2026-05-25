@@ -79,13 +79,11 @@ const handleCallback = async () => {
         isLoading.value = false
 
         console.log('当前登录状态检查:', {
-          token: !!userStore.token,
           userInfo: !!userStore.userInfo,
           isLoggedIn: userStore.isLoggedIn
         })
         
         console.log('localStorage 检查:', {
-          token: !!localStorage.getItem('token'),
           userInfo: !!localStorage.getItem('userInfo')
         })
 
