@@ -306,7 +306,7 @@ const menuItems = computed(() => {
 
 // 当前页面标题
 const currentPageTitle = computed(() => {
-  const currentItem = menuItems.find(item => item.path === route.path)
+  const currentItem = menuItems.value?.find(item => item.path === route.path)
   return currentItem?.title
 })
 

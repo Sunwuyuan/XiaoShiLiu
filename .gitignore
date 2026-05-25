@@ -46,3 +46,7 @@ Thumbs.db
 
 # uploads
 express-project/uploads/
+
+# Security audit reports (contain sensitive information)
+SECURITY_AUDIT*.md
+/security-audit*
