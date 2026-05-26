@@ -97,7 +97,7 @@ export const useAdminStore = defineStore('admin', () => {
   const logout = async () => {
     try {
       // 调用后端登出接口 - 后端会清除HttpOnly Cookie
-      await adminApi.logout()
+      const response = await adminApi.logout()
 
       // 清除本地存储
       admin.value = null
@@ -106,13 +106,20 @@ export const useAdminStore = defineStore('admin', () => {
       localStorage.removeItem('admin_info')
       localStorage.removeItem('admin_permissions')
 
+      // 如果后端返回失败，记录错误但仍然完成本地清除
+      if (!response.success) {
+        console.error('管理员退出登录后端返回失败:', response.message)
+      }
+
+      return { success: true }
     } catch (error) {
       console.error('管理员退出登录失败:', error)
-      // 即使后端接口失败，也要清除本地状态
+      // 发生网络错误时也应该清除本地状态
       admin.value = null
       permissions.value = []
       localStorage.removeItem('admin_info')
       localStorage.removeItem('admin_permissions')
+      return { success: false, message: error.message }
     }
   }
 

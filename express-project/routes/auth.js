@@ -901,10 +901,6 @@ router.post('/admin/login', async (req, res) => {
 // 获取当前管理员信息
 router.get('/admin/me', authenticateToken, async (req, res) => {
   try {
-    if (!req.user.type || req.user.type !== 'admin') {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '权限不足' });
-    }
-
     const adminId = req.user.adminId;
 
     const [adminRows] = await pool.execute(
@@ -1242,11 +1238,6 @@ router.post('/admin/refresh', async (req, res) => {
 // 管理员登出
 router.post('/admin/logout', authenticateToken, async (req, res) => {
   try {
-    // 检查是否为管理员token
-    if (!req.user.type || req.user.type !== 'admin') {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '权限不足' });
-    }
-
     const adminId = req.user.adminId || req.user.id;
     const token = req.token;
 
@@ -1264,9 +1255,9 @@ router.post('/admin/logout', authenticateToken, async (req, res) => {
       path: '/',
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'lax'  // 与登录时一致，使用lax
+      sameSite: 'lax'
     };
-    
+
     res.clearCookie('admin_token', clearOptions);
     res.clearCookie('admin_refresh_token', clearOptions);
 

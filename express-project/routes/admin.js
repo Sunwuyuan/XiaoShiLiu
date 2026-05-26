@@ -5,6 +5,7 @@ const { pool } = require('../config/config')
 const { createCrudHandlers } = require('../middleware/crudFactory')
 const { recordExists } = require('../utils/dbHelper')
 const { adminAuth } = require('../utils/uploadHelper')
+const { requirePermission } = require('../middleware/permission')
 const {
   validateLikeOrFavoriteData,
   validateFollowData,
@@ -615,7 +616,7 @@ const postsHandlers = createCrudHandlers(postsCrudConfig)
 // 笔记审核相关API
 
 // 获取待审核笔记列表
-router.get('/posts-audit', adminAuth, async (req, res) => {
+router.get('/posts-audit', adminAuth, requirePermission('post_audit:view'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1
     const limit = parseInt(req.query.limit) || 20
@@ -746,7 +747,7 @@ router.get('/posts-audit', adminAuth, async (req, res) => {
 })
 
 // 审核通过
-router.put('/posts-audit/:id/approve', adminAuth, async (req, res) => {
+router.put('/posts-audit/:id/approve', adminAuth, requirePermission('post_audit:audit'), async (req, res) => {
   try {
     const postId = req.params.id
     const adminId = req.user.adminId
@@ -820,7 +821,7 @@ router.put('/posts-audit/:id/approve', adminAuth, async (req, res) => {
 })
 
 // 拒绝发布
-router.put('/posts-audit/:id/reject', adminAuth, async (req, res) => {
+router.put('/posts-audit/:id/reject', adminAuth, requirePermission('post_audit:audit'), async (req, res) => {
   try {
     const postId = req.params.id
     const adminId = req.user.adminId
@@ -856,15 +857,27 @@ router.put('/posts-audit/:id/reject', adminAuth, async (req, res) => {
   }
 })
 
-router.post('/posts-audit', adminAuth, postsHandlers.create)
-router.delete('/posts-audit', adminAuth, postsHandlers.deleteMany)
+router.post('/posts-audit', adminAuth, requirePermission('post_audit:audit'), postsHandlers.create)
+router.delete('/posts-audit', adminAuth, requirePermission('post_audit:audit'), postsHandlers.deleteMany)
 
 // 注册 Posts CRUD 路由
-router.post('/posts', adminAuth, postsHandlers.create)
-router.put('/posts/:id', adminAuth, postsHandlers.update)
-router.delete('/posts/:id', adminAuth, postsHandlers.deleteOne)
-router.delete('/posts', adminAuth, postsHandlers.deleteMany)
-router.get('/posts/:id', adminAuth, async (req, res) => {
+router.get('/posts', adminAuth, requirePermission('posts:view'), async (req, res) => {
+  try {
+    const result = await postsCrudConfig.customQueries.getList(req)
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: 'success',
+      data: result
+    })
+  } catch (error) {
+    console.error('获取笔记列表失败:', error)
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '获取笔记列表失败'
+    })
+  }
+})
+router.get('/posts/:id', adminAuth, requirePermission('posts:view'), async (req, res) => {
   try {
     const result = await postsCrudConfig.customQueries.getOne(req)
     if (!result) {
@@ -886,23 +899,10 @@ router.get('/posts/:id', adminAuth, async (req, res) => {
     })
   }
 })
-// 使用自定义查询覆盖默认的getList
-router.get('/posts', adminAuth, async (req, res) => {
-  try {
-    const result = await postsCrudConfig.customQueries.getList(req)
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: 'success',
-      data: result
-    })
-  } catch (error) {
-    console.error('获取笔记列表失败:', error)
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.ERROR,
-      message: '获取笔记列表失败'
-    })
-  }
-})
+router.post('/posts', adminAuth, requirePermission('posts:edit'), postsHandlers.create)
+router.put('/posts/:id', adminAuth, requirePermission('posts:edit'), postsHandlers.update)
+router.delete('/posts/:id', adminAuth, requirePermission('posts:delete'), postsHandlers.deleteOne)
+router.delete('/posts', adminAuth, requirePermission('posts:delete'), postsHandlers.deleteMany)
 
 // 创建评论
 // ===== COMMENTS CRUD (使用工厂模式) =====
@@ -1036,13 +1036,7 @@ const commentsCrudConfig = {
 const commentsHandlers = createCrudHandlers(commentsCrudConfig)
 
 // 评论CRUD路由
-router.post('/comments', adminAuth, commentsHandlers.create)
-router.put('/comments/:id', adminAuth, commentsHandlers.update)
-router.delete('/comments/:id', adminAuth, commentsHandlers.deleteOne)
-router.delete('/comments', adminAuth, commentsHandlers.deleteMany)
-router.get('/comments/:id', adminAuth, commentsHandlers.getOne)
-// 使用自定义查询覆盖默认的getList
-router.get('/comments', adminAuth, async (req, res) => {
+router.get('/comments', adminAuth, requirePermission('comments:view'), async (req, res) => {
   try {
     const result = await commentsCrudConfig.customQueries.getList(req)
     res.json({
@@ -1058,6 +1052,11 @@ router.get('/comments', adminAuth, async (req, res) => {
     })
   }
 })
+router.get('/comments/:id', adminAuth, requirePermission('comments:view'), commentsHandlers.getOne)
+router.post('/comments', adminAuth, requirePermission('comments:create'), commentsHandlers.create)
+router.put('/comments/:id', adminAuth, requirePermission('comments:edit'), commentsHandlers.update)
+router.delete('/comments/:id', adminAuth, requirePermission('comments:delete'), commentsHandlers.deleteOne)
+router.delete('/comments', adminAuth, requirePermission('comments:delete'), commentsHandlers.deleteMany)
 
 // 创建标签
 // ==================== 标签管理（使用CRUD工厂重构） ====================
@@ -1083,12 +1082,12 @@ const tagsCrudConfig = {
 const tagsHandlers = createCrudHandlers(tagsCrudConfig)
 
 // 标签路由
-router.post('/tags', adminAuth, tagsHandlers.create)
-router.put('/tags/:id', adminAuth, tagsHandlers.update)
-router.delete('/tags/:id', adminAuth, tagsHandlers.deleteOne)
-router.delete('/tags', adminAuth, tagsHandlers.deleteMany)
-router.get('/tags/:id', adminAuth, tagsHandlers.getOne)
-router.get('/tags', adminAuth, tagsHandlers.getList)
+router.get('/tags', adminAuth, requirePermission('tags:view'), tagsHandlers.getList)
+router.get('/tags/:id', adminAuth, requirePermission('tags:view'), tagsHandlers.getOne)
+router.post('/tags', adminAuth, requirePermission('tags:create'), tagsHandlers.create)
+router.put('/tags/:id', adminAuth, requirePermission('tags:edit'), tagsHandlers.update)
+router.delete('/tags/:id', adminAuth, requirePermission('tags:delete'), tagsHandlers.deleteOne)
+router.delete('/tags', adminAuth, requirePermission('tags:delete'), tagsHandlers.deleteMany)
 
 // ==================== 点赞管理（使用CRUD工厂重构） ====================
 
@@ -1219,13 +1218,7 @@ router.get('/test-users', adminAuth, async (req, res) => {
 })
 
 // 点赞路由
-router.post('/likes', adminAuth, likesHandlers.create)
-router.put('/likes/:id', adminAuth, likesHandlers.update)
-router.delete('/likes/:id', adminAuth, likesHandlers.deleteOne)
-router.delete('/likes', adminAuth, likesHandlers.deleteMany)
-router.get('/likes/:id', adminAuth, likesHandlers.getOne)
-// 使用自定义查询覆盖默认的getList
-router.get('/likes', adminAuth, async (req, res) => {
+router.get('/likes', adminAuth, requirePermission('likes:view'), async (req, res) => {
   try {
     const result = await likesCrudConfig.customQueries.getList(req)
     res.json({
@@ -1241,6 +1234,11 @@ router.get('/likes', adminAuth, async (req, res) => {
     })
   }
 })
+router.get('/likes/:id', adminAuth, requirePermission('likes:view'), likesHandlers.getOne)
+router.post('/likes', adminAuth, requirePermission('likes:view'), likesHandlers.create)
+router.put('/likes/:id', adminAuth, requirePermission('likes:view'), likesHandlers.update)
+router.delete('/likes/:id', adminAuth, requirePermission('likes:delete'), likesHandlers.deleteOne)
+router.delete('/likes', adminAuth, requirePermission('likes:delete'), likesHandlers.deleteMany)
 
 // 创建收藏
 // ==================== 收藏管理（使用CRUD工厂重构） ====================
@@ -1382,13 +1380,7 @@ const collectionsCrudConfig = {
 const collectionsHandlers = createCrudHandlers(collectionsCrudConfig)
 
 // 收藏路由
-router.post('/collections', adminAuth, collectionsHandlers.create)
-router.put('/collections/:id', adminAuth, collectionsHandlers.update)
-router.delete('/collections/:id', adminAuth, collectionsHandlers.deleteOne)
-router.delete('/collections', adminAuth, collectionsHandlers.deleteMany)
-router.get('/collections/:id', adminAuth, collectionsHandlers.getOne)
-// 使用自定义查询覆盖默认的getList
-router.get('/collections', adminAuth, async (req, res) => {
+router.get('/collections', adminAuth, requirePermission('collections:view'), async (req, res) => {
   try {
     const result = await collectionsCrudConfig.customQueries.getList(req)
     res.json({
@@ -1404,6 +1396,11 @@ router.get('/collections', adminAuth, async (req, res) => {
     })
   }
 })
+router.get('/collections/:id', adminAuth, requirePermission('collections:view'), collectionsHandlers.getOne)
+router.post('/collections', adminAuth, requirePermission('collections:view'), collectionsHandlers.create)
+router.put('/collections/:id', adminAuth, requirePermission('collections:view'), collectionsHandlers.update)
+router.delete('/collections/:id', adminAuth, requirePermission('collections:delete'), collectionsHandlers.deleteOne)
+router.delete('/collections', adminAuth, requirePermission('collections:delete'), collectionsHandlers.deleteMany)
 
 // 创建关注
 // ==================== 关注管理（使用CRUD工厂重构） ====================
@@ -1573,13 +1570,7 @@ const followsCrudConfig = {
 const followsHandlers = createCrudHandlers(followsCrudConfig)
 
 // 关注路由
-router.post('/follows', adminAuth, followsHandlers.create)
-router.put('/follows/:id', adminAuth, followsHandlers.update)
-router.delete('/follows/:id', adminAuth, followsHandlers.deleteOne)
-router.delete('/follows', adminAuth, followsHandlers.deleteMany)
-router.get('/follows/:id', adminAuth, followsHandlers.getOne)
-// 使用自定义查询覆盖默认的getList
-router.get('/follows', adminAuth, async (req, res) => {
+router.get('/follows', adminAuth, requirePermission('follows:view'), async (req, res) => {
   try {
     const result = await followsCrudConfig.customQueries.getList(req)
     res.json({
@@ -1595,6 +1586,11 @@ router.get('/follows', adminAuth, async (req, res) => {
     })
   }
 })
+router.get('/follows/:id', adminAuth, requirePermission('follows:view'), followsHandlers.getOne)
+router.post('/follows', adminAuth, requirePermission('follows:view'), followsHandlers.create)
+router.put('/follows/:id', adminAuth, requirePermission('follows:view'), followsHandlers.update)
+router.delete('/follows/:id', adminAuth, requirePermission('follows:delete'), followsHandlers.deleteOne)
+router.delete('/follows', adminAuth, requirePermission('follows:delete'), followsHandlers.deleteMany)
 
 // 通知管理 CRUD 配置
 const notificationsCrudConfig = {
@@ -1688,13 +1684,7 @@ const notificationsCrudConfig = {
 const notificationsHandlers = createCrudHandlers(notificationsCrudConfig)
 
 // 通知管理路由
-router.post('/notifications', adminAuth, notificationsHandlers.create)
-router.put('/notifications/:id', adminAuth, notificationsHandlers.update)
-router.delete('/notifications/:id', adminAuth, notificationsHandlers.deleteOne)
-router.delete('/notifications', adminAuth, notificationsHandlers.deleteMany)
-router.get('/notifications/:id', adminAuth, notificationsHandlers.getOne)
-// 使用自定义查询覆盖默认的getList
-router.get('/notifications', adminAuth, async (req, res) => {
+router.get('/notifications', adminAuth, requirePermission('notifications:view'), async (req, res) => {
   try {
     const result = await notificationsCrudConfig.customQueries.getList(req)
     res.json({
@@ -1710,6 +1700,11 @@ router.get('/notifications', adminAuth, async (req, res) => {
     })
   }
 })
+router.get('/notifications/:id', adminAuth, requirePermission('notifications:view'), notificationsHandlers.getOne)
+router.post('/notifications', adminAuth, requirePermission('notifications:create'), notificationsHandlers.create)
+router.put('/notifications/:id', adminAuth, requirePermission('notifications:edit'), notificationsHandlers.update)
+router.delete('/notifications/:id', adminAuth, requirePermission('notifications:delete'), notificationsHandlers.deleteOne)
+router.delete('/notifications', adminAuth, requirePermission('notifications:delete'), notificationsHandlers.deleteMany)
 
 // 会话管理 CRUD 配置
 const sessionsCrudConfig = {
@@ -1817,14 +1812,7 @@ const sessionsCrudConfig = {
 const sessionsHandlers = createCrudHandlers(sessionsCrudConfig)
 
 // 会话管理路由
-router.post('/sessions', adminAuth, sessionsHandlers.create)
-
-router.put('/sessions/:id', adminAuth, sessionsHandlers.update)
-router.delete('/sessions/:id', adminAuth, sessionsHandlers.deleteOne)
-router.delete('/sessions', adminAuth, sessionsHandlers.deleteMany)
-router.get('/sessions/:id', adminAuth, sessionsHandlers.getOne)
-// 使用自定义查询覆盖默认的getList
-router.get('/sessions', adminAuth, async (req, res) => {
+router.get('/sessions', adminAuth, requirePermission('sessions:view'), async (req, res) => {
   try {
     const result = await sessionsCrudConfig.customQueries.getList(req)
     res.json({
@@ -1840,6 +1828,11 @@ router.get('/sessions', adminAuth, async (req, res) => {
     })
   }
 })
+router.get('/sessions/:id', adminAuth, requirePermission('sessions:view'), sessionsHandlers.getOne)
+router.post('/sessions', adminAuth, requirePermission('sessions:create'), sessionsHandlers.create)
+router.put('/sessions/:id', adminAuth, requirePermission('sessions:edit'), sessionsHandlers.update)
+router.delete('/sessions/:id', adminAuth, requirePermission('sessions:delete'), sessionsHandlers.deleteOne)
+router.delete('/sessions', adminAuth, requirePermission('sessions:delete'), sessionsHandlers.deleteMany)
 
 // 管理员会话管理 CRUD 配置
 const adminSessionsCrudConfig = {
@@ -1926,13 +1919,8 @@ const adminSessionsCrudConfig = {
 const adminSessionsHandlers = createCrudHandlers(adminSessionsCrudConfig)
 
 // 管理员会话管理路由
-router.post('/admin-sessions', adminAuth, adminSessionsHandlers.create)
-router.put('/admin-sessions/:id', adminAuth, adminSessionsHandlers.update)
-router.delete('/admin-sessions/:id', adminAuth, adminSessionsHandlers.deleteOne)
-router.delete('/admin-sessions', adminAuth, adminSessionsHandlers.deleteMany)
-router.get('/admin-sessions/:id', adminAuth, adminSessionsHandlers.getOne)
-// 使用自定义查询覆盖默认的getList
-router.get('/admin-sessions', adminAuth, async (req, res) => {
+// 管理员会话管理路由
+router.get('/admin-sessions', adminAuth, requirePermission('admin_sessions:view'), async (req, res) => {
   try {
     const result = await adminSessionsCrudConfig.customQueries.getList(req)
     res.json({
@@ -1948,7 +1936,15 @@ router.get('/admin-sessions', adminAuth, async (req, res) => {
     })
   }
 })
+router.get('/admin-sessions/:id', adminAuth, requirePermission('admin_sessions:view'), adminSessionsHandlers.getOne)
+router.post('/admin-sessions', adminAuth, requirePermission('admin_sessions:create'), adminSessionsHandlers.create)
+router.put('/admin-sessions/:id', adminAuth, requirePermission('admin_sessions:edit'), adminSessionsHandlers.update)
+router.delete('/admin-sessions/:id', adminAuth, requirePermission('admin_sessions:delete'), adminSessionsHandlers.deleteOne)
+router.delete('/admin-sessions', adminAuth, requirePermission('admin_sessions:delete'), adminSessionsHandlers.deleteMany)
 
+
+
+// ===== USERS CRUD (使用工厂模式) =====
 
 
 // ===== USERS CRUD (使用工厂模式) =====
@@ -2212,11 +2208,23 @@ const usersCrudConfig = {
 const usersHandlers = createCrudHandlers(usersCrudConfig)
 
 // 用户CRUD路由
-router.post('/users', adminAuth, usersHandlers.create)
-router.put('/users/:id', adminAuth, usersHandlers.update)
-router.delete('/users/:id', adminAuth, usersHandlers.deleteOne)
-router.delete('/users', adminAuth, usersHandlers.deleteMany)
-router.get('/users/:id', adminAuth, async (req, res) => {
+router.get('/users', adminAuth, requirePermission('users:view'), async (req, res) => {
+  try {
+    const result = await usersCrudConfig.customQueries.getList(req)
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: 'success',
+      data: result
+    })
+  } catch (error) {
+    console.error('获取用户列表失败:', error)
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '获取用户列表失败'
+    })
+  }
+})
+router.get('/users/:id', adminAuth, requirePermission('users:view'), async (req, res) => {
   try {
     const result = await usersCrudConfig.customQueries.getOne(req)
     if (!result) {
@@ -2238,25 +2246,11 @@ router.get('/users/:id', adminAuth, async (req, res) => {
     })
   }
 })
-router.get('/users', adminAuth, async (req, res) => {
-  try {
-    const result = await usersCrudConfig.customQueries.getList(req)
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: 'success',
-      data: result
-    })
-  } catch (error) {
-    console.error('获取用户列表失败:', error)
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.ERROR,
-      message: '获取用户列表失败'
-    })
-  }
-})
-
-// 更新用户is_active状态的辅助函数
-async function updateUserActiveStatus(userId, active, operatorId) {
+router.post('/users', adminAuth, requirePermission('users:edit'), usersHandlers.create)
+router.put('/users/:id', adminAuth, requirePermission('users:edit'), usersHandlers.update)
+router.delete('/users/:id', adminAuth, requirePermission('users:delete'), usersHandlers.deleteOne)
+router.delete('/users', adminAuth, requirePermission('users:delete'), usersHandlers.deleteMany)
+router.post('/users/:id/ban', adminAuth, requirePermission('users:ban'), async (req, res) => {
   try {
     await pool.execute(
       'UPDATE users SET is_active = ? WHERE id = ?',
@@ -2423,7 +2417,7 @@ async function unbanUser(userId, operatorId) {
 }
 
 // 用户解封操作
-router.post('/users/:id/unban', adminAuth, async (req, res) => {
+router.post('/users/:id/unban', adminAuth, requirePermission('users:ban'), async (req, res) => {
   try {
     const userId = req.params.id
     const adminId = req.user?.id || 0
@@ -2819,54 +2813,52 @@ const auditCrudConfig = {
 const auditHandlers = createCrudHandlers(auditCrudConfig)
 
 // 认证管理路由
-router.post('/audit', adminAuth, auditHandlers.create)
-router.put('/audit/:id', adminAuth, auditHandlers.update)
-router.delete('/audit/:id', adminAuth, auditHandlers.deleteOne)
-router.delete('/audit', adminAuth, auditHandlers.deleteMany)
-router.get('/audit/:id', adminAuth, async (req, res) => {
-  try {
-    const result = await auditCrudConfig.customQueries.getOne(req)
-    if (!result) {
-      return res.status(HTTP_STATUS.NOT_FOUND).json({
-        code: RESPONSE_CODES.NOT_FOUND,
-        message: '认证记录不存在'
-      })
-    }
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: '获取认证记录成功',
-      data: result
-    })
-  } catch (error) {
-    console.error('获取认证记录失败:', error)
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.ERROR,
-      message: '获取认证记录失败',
-      error: error.message
-    })
-  }
-})
-
-router.get('/audit', adminAuth, async (req, res) => {
+router.get('/audit', adminAuth, requirePermission('audit:view'), async (req, res) => {
   try {
     const result = await auditCrudConfig.customQueries.getList(req)
     res.json({
       code: RESPONSE_CODES.SUCCESS,
-      message: '获取认证列表成功',
+      message: 'success',
       data: result
     })
   } catch (error) {
     console.error('获取认证列表失败:', error)
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
       code: RESPONSE_CODES.ERROR,
-      message: '获取认证列表失败',
-      error: error.message
+      message: '获取认证列表失败'
     })
   }
 })
+router.get('/audit/:id', adminAuth, requirePermission('audit:view'), async (req, res) => {
+  try {
+    const result = await auditCrudConfig.customQueries.getOne(req)
+    if (!result) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        code: RESPONSE_CODES.NOT_FOUND,
+        message: '认证不存在'
+      })
+    }
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: 'success',
+      data: result
+    })
+  } catch (error) {
+    console.error('获取认证详情失败:', error)
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '获取认证详情失败'
+    })
+  }
+})
+router.post('/audit', adminAuth, requirePermission('audit:create'), auditHandlers.create)
+router.put('/audit/:id', adminAuth, requirePermission('audit:edit'), auditHandlers.update)
+router.delete('/audit/:id', adminAuth, requirePermission('audit:delete'), auditHandlers.deleteOne)
+router.delete('/audit', adminAuth, requirePermission('audit:delete'), auditHandlers.deleteMany)
 
+// 认证审核操作
 // 审核通过
-router.put('/audit/:id/approve', adminAuth, async (req, res) => {
+router.put('/audit/:id/approve', adminAuth, requirePermission('audit:audit'), async (req, res) => {
   try {
     const { id } = req.params
     const { remark } = req.body
@@ -2924,7 +2916,7 @@ router.put('/audit/:id/approve', adminAuth, async (req, res) => {
 })
 
 // 拒绝申请
-router.put('/audit/:id/reject', adminAuth, async (req, res) => {
+router.put('/audit/:id/reject', adminAuth, requirePermission('audit:audit'), async (req, res) => {
   try {
     const { id } = req.params
     const { remark } = req.body
@@ -3233,16 +3225,28 @@ const categoriesCrudConfig = {
 const categoriesHandlers = createCrudHandlers(categoriesCrudConfig)
 
 // Categories 路由
-router.post('/categories', adminAuth, categoriesHandlers.create)
-router.put('/categories/:id', adminAuth, categoriesHandlers.update)
-router.delete('/categories/:id', adminAuth, categoriesHandlers.deleteOne)
-router.delete('/categories', adminAuth, categoriesHandlers.deleteMany)
-router.get('/categories/:id', adminAuth, categoriesHandlers.getOne)
-router.get('/categories', adminAuth, async (req, res) => {
+// 分类管理路由
+router.get('/categories', adminAuth, requirePermission('categories:view'), async (req, res) => {
   try {
     const result = await categoriesCrudConfig.customQueries.getList(req)
     res.json({
       code: RESPONSE_CODES.SUCCESS,
+      message: 'success',
+      data: result
+    })
+  } catch (error) {
+    console.error('获取分类列表失败:', error)
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '获取分类列表失败'
+    })
+  }
+})
+router.get('/categories/:id', adminAuth, requirePermission('categories:view'), categoriesHandlers.getOne)
+router.post('/categories', adminAuth, requirePermission('categories:create'), categoriesHandlers.create)
+router.put('/categories/:id', adminAuth, requirePermission('categories:edit'), categoriesHandlers.update)
+router.delete('/categories/:id', adminAuth, requirePermission('categories:delete'), categoriesHandlers.deleteOne)
+router.delete('/categories', adminAuth, requirePermission('categories:delete'), categoriesHandlers.deleteMany)
       message: '获取成功',
       ...result
     })

@@ -289,30 +289,35 @@ watch(isFilterOpen, (newValue) => {
 
 // 菜单项
 const menuItems = computed(() => {
-  const items = [
-    { path: '/admin/api-docs', title: 'API文档', icon: 'data' },
-    { path: '/admin/monitor', title: '动态监控', icon: 'monitor' },
-    { path: '/admin/users', title: '用户管理', icon: 'user' },
-    { path: '/admin/posts', title: '笔记管理', icon: 'post' },
-    { path: '/admin/post-audit', title: '笔记审核', icon: 'audit' },
-    { path: '/admin/comments', title: '评论管理', icon: 'chat' },
-    { path: '/admin/categories', title: '分类管理', icon: 'category' },
-    { path: '/admin/tags', title: '标签管理', icon: 'hash' },
-    { path: '/admin/likes', title: '点赞管理', icon: 'like' },
-    { path: '/admin/collections', title: '收藏管理', icon: 'collect' },
-    { path: '/admin/follows', title: '关注管理', icon: 'follow' },
-    { path: '/admin/notifications', title: '通知管理', icon: 'notification' },
-    { path: '/admin/sessions', title: '用户会话管理', icon: 'setting' },
-    { path: '/admin/admin-sessions', title: '管理员会话管理', icon: 'setting' },
-    { path: '/admin/audit', title: '认证管理', icon: 'verified' },
+  const allItems = [
+    { path: '/admin/api-docs', title: 'API文档', icon: 'data', permission: 'api_docs:view' },
+    { path: '/admin/monitor', title: '动态监控', icon: 'monitor', permission: 'monitor:view' },
+    { path: '/admin/users', title: '用户管理', icon: 'user', permission: 'users:view' },
+    { path: '/admin/posts', title: '笔记管理', icon: 'post', permission: 'posts:view' },
+    { path: '/admin/post-audit', title: '笔记审核', icon: 'audit', permission: 'post_audit:view' },
+    { path: '/admin/comments', title: '评论管理', icon: 'chat', permission: 'comments:view' },
+    { path: '/admin/categories', title: '分类管理', icon: 'category', permission: 'categories:view' },
+    { path: '/admin/tags', title: '标签管理', icon: 'hash', permission: 'tags:view' },
+    { path: '/admin/likes', title: '点赞管理', icon: 'like', permission: 'likes:view' },
+    { path: '/admin/collections', title: '收藏管理', icon: 'collect', permission: 'collections:view' },
+    { path: '/admin/follows', title: '关注管理', icon: 'follow', permission: 'follows:view' },
+    { path: '/admin/notifications', title: '通知管理', icon: 'notification', permission: 'notifications:view' },
+    { path: '/admin/sessions', title: '用户会话管理', icon: 'setting', permission: 'sessions:view' },
+    { path: '/admin/admin-sessions', title: '管理员会话管理', icon: 'setting', permission: 'admin_sessions:view' },
+    { path: '/admin/audit', title: '认证管理', icon: 'verified', permission: 'audit:view' },
   ]
-  
+
+  // 根据权限过滤菜单项
+  const filteredItems = adminStore.isSuperAdmin
+    ? allItems
+    : allItems.filter(item => adminStore.hasPermission(item.permission))
+
   // 只有超级管理员才能看到管理员管理菜单
   if (adminStore.isSuperAdmin) {
-    items.push({ path: '/admin/admins', title: '管理员管理', icon: 'admin' })
+    filteredItems.push({ path: '/admin/admins', title: '管理员管理', icon: 'admin', permission: 'admins:view' })
   }
-  
-  return items
+
+  return filteredItems
 })
 
 // 当前页面标题
