@@ -1137,9 +1137,9 @@ router.delete('/admin/admins/:id', authenticateToken, async (req, res) => {
   try {
     // 权限检查 - 需要删除管理员权限
     if (!checkPermission(req.user.adminPermissions, 'admins:delete', req.user.isSuper)) {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ 
-        code: RESPONSE_CODES.FORBIDDEN, 
-        message: '无权限删除管理员' 
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权限删除管理员'
       });
     }
 
@@ -1147,7 +1147,7 @@ router.delete('/admin/admins/:id', authenticateToken, async (req, res) => {
 
     // 检查管理员是否存在
     const [adminRows] = await pool.execute(
-      'SELECT username FROM admin WHERE username = ?',
+      'SELECT id, username, logto_id FROM admin WHERE id = ?',
       [adminId]
     );
 
@@ -1155,8 +1155,15 @@ router.delete('/admin/admins/:id', authenticateToken, async (req, res) => {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '管理员不存在' });
     }
 
-    // 删除管理员
-    await pool.execute('DELETE FROM admin WHERE username = ?', [adminId]);
+    const admin = adminRows[0];
+
+    // 优先按 id 删除，如果 logto_id 存在也可以用它来确保准确性
+    if (admin.logto_id) {
+      await pool.execute('DELETE FROM admin WHERE id = ? AND logto_id = ?', [adminId, admin.logto_id]);
+    } else {
+      // 没有 logto_id 的管理员按 username 删除
+      await pool.execute('DELETE FROM admin WHERE id = ? AND username = ?', [adminId, admin.username]);
+    }
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
