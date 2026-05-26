@@ -352,7 +352,7 @@ router.post('/callback', async (req, res) => {
     const userCookieOptions = {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? 'strict' : 'lax',  // 开发环境用lax
+      sameSite: 'lax',  // 使用lax确保Cookie在同域请求中正常传递
       maxAge: 7 * 24 * 60 * 60 * 1000,  // 7天
       path: '/'
     };
@@ -649,24 +649,17 @@ router.post('/admin/callback', async (req, res) => {
     
     // 根据环境配置不同的Cookie策略
     // 开发环境：使用 lax 模式确保Cookie能正常传递
-    // 生产环境：使用 strict 模式提供最高安全性
+    // 生产环境：使用 lax 模式（同域情况下使用strict可能导致Cookie不传递）
+    // 🔧 修复：同域情况下使用 lax 更安全，避免Cookie不传递问题
     const cookieOptions = {
       httpOnly: true,
       secure: isProduction,  // 生产环境必须用HTTPS
-      sameSite: isProduction ? 'strict' : 'lax',  // 开发环境用lax避免问题
+      sameSite: 'lax',  // 使用lax确保Cookie在同域请求中正常传递
       maxAge: 7 * 24 * 60 * 60 * 1000,  // 7天
       path: '/',
       // 明确设置domain，确保Cookie在正确的域下生效
       domain: undefined  // 不设置domain，让浏览器自动使用当前域
     };
-    
-    console.log('   httpOnly:', cookieOptions.httpOnly);
-    console.log('   secure:', cookieOptions.secure, '(生产环境应该为true)');
-    console.log('   sameSite:', cookieOptions.sameSite, '(生产环境应该是strict)');
-    console.log('   maxAge:', cookieOptions.maxAge, 'ms (', cookieOptions.maxAge / (1000*60*60*24), '天)');
-    console.log('   path:', cookieOptions.path);
-    console.log('   domain:', cookieOptions.domain || '(未设置，使用默认)');
-    console.log('🔑 ===== Token生成结束 =====\n');
     
     res.cookie('admin_token', accessToken, cookieOptions);
     

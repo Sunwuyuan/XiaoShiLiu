@@ -810,7 +810,7 @@ router.post('/logout', authenticateToken, async (req, res) => {
       path: '/',
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? 'strict' : 'lax'
+      sameSite: 'lax'  // 与登录时一致，使用lax
     };
     
     res.clearCookie('token', clearOptions);
@@ -1257,7 +1257,7 @@ router.post('/admin/logout', authenticateToken, async (req, res) => {
       path: '/',
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? 'strict' : 'lax'
+      sameSite: 'lax'  // 与登录时一致，使用lax
     };
     
     res.clearCookie('admin_token', clearOptions);
