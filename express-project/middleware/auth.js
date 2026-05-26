@@ -1,4 +1,5 @@
 const { verifyToken } = require('../utils/jwt');
+const config = require('../config/config');
 
 /**
  * 从请求头或Cookie中提取token
@@ -72,11 +73,11 @@ async function authenticateToken(req, res, next) {
       }
 
       // 验证token前打印JWT Secret信息
-      const { JWT_SECRET } = require('../config/config');
+      const jwtSecret = config.jwt.secret;
       console.log('🔐 JWT Secret信息:');
-      console.log('   长度:', JWT_SECRET.length);
-      console.log('   前20字符:', JWT_SECRET.substring(0, 20));
-      console.log('   是否为默认值?:', JWT_SECRET.includes('xiaoshiliu_secret_key'));
+      console.log('   长度:', jwtSecret ? jwtSecret.length : 0);
+      console.log('   前20字符:', jwtSecret ? jwtSecret.substring(0, 20) : '(未设置)');
+      console.log('   是否为默认值?:', jwtSecret ? jwtSecret.includes('xiaoshiliu_secret_key') : false);
       
       // 验证token
       let decoded;
