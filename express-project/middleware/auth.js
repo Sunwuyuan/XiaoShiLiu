@@ -34,15 +34,96 @@ async function authenticateToken(req, res, next) {
   try {
     const token = extractTokenFromHeader(req);
 
-    if (!token) {
-      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-        code: RESPONSE_CODES.UNAUTHORIZED,
-        message: '访问令牌缺失'
-      });
-    }
+    // 🔍 详细调试日志 - 帮助定位生产环境问题
+    if (req.path && (req.path.includes('/admin') || req.path.includes('/me'))) {
+      console.log('\n🔐 ===== 认证调试信息 =====');
+      console.log('📅 时间:', new Date().toISOString());
+      console.log('🌐 请求路径:', req.path || req.originalUrl);
+      console.log('📮 请求方法:', req.method);
+      console.log('🍪 所有Cookies:', Object.keys(req.cookies || {}));
+      
+      if (req.cookies?.admin_token) {
+        console.log('✅ admin_token Cookie存在');
+        console.log('   长度:', req.cookies.admin_token.length);
+        console.log('   前50字符:', req.cookies.admin_token.substring(0, 50));
+        console.log('   后10字符:', req.cookies.admin_token.slice(-10));
+        // 检查是否是有效的JWT格式（3部分用.分隔）
+        const parts = req.cookies.admin_token.split('.');
+        console.log('   JWT部分数:', parts.length, '(应该是3)');
+      } else {
+        console.log('❌ admin_token Cookie不存在');
+      }
+      
+      if (req.cookies?.token) {
+        console.log('✅ token Cookie存在 (用户Token)');
+      } else {
+        console.log('⚠️ token Cookie不存在');
+      }
+      
+      console.log('🔑 Authorization头:', req.headers.authorization ? '存在' : '不存在');
+      console.log('📤 提取到的最终token:', token ? '存在' : '❌ 不存在！');
+      
+      if (!token) {
+        console.log('💥 问题: 无法从任何来源提取到token\n');
+        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+          code: RESPONSE_CODES.UNAUTHORIZED,
+          message: '访问令牌缺失'
+        });
+      }
 
-    // 验证token
-    const decoded = verifyToken(token);
+      // 验证token前打印JWT Secret信息
+      const { JWT_SECRET } = require('../config/config');
+      console.log('🔐 JWT Secret信息:');
+      console.log('   长度:', JWT_SECRET.length);
+      console.log('   前20字符:', JWT_SECRET.substring(0, 20));
+      console.log('   是否为默认值?:', JWT_SECRET.includes('xiaoshiliu_secret_key'));
+      
+      // 验证token
+      let decoded;
+      try {
+        decoded = verifyToken(token);
+        console.log('✅ Token解码成功:');
+        console.log('   类型:', decoded.type);
+        console.log('   adminId/userId:', decoded.adminId || decoded.userId);
+        console.log('   username:', decoded.username);
+        console.log('🔐 ===== 认证调试结束 =====\n');
+      } catch (verifyError) {
+        console.error('❌ Token验证失败详情:');
+        console.error('   错误类型:', verifyError.name);
+        console.error('   错误消息:', verifyError.message);
+        console.error('   Token前100字符:', token.substring(0, 100));
+        if (verifyError.message === 'jwt expired') {
+          console.error('   ⚠️ Token已过期！');
+        } else if (verifyError.message === 'invalid signature') {
+          console.error('   ⚠️ 签名无效 - JWT Secret不匹配！');
+          console.error('   💡 可能原因：服务器重启后Secret改变了');
+        }
+        console.error('🔐 ===== 认证调试结束 =====\n');
+        
+        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+          code: RESPONSE_CODES.UNAUTHORIZED,
+          message: '无效的访问令牌'
+        });
+      }
+    } else {
+      // 非admin/me路径，简化处理
+      if (!token) {
+        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+          code: RESPONSE_CODES.UNAUTHORIZED,
+          message: '访问令牌缺失'
+        });
+      }
+      
+      let decoded;
+      try {
+        decoded = verifyToken(token);
+      } catch (verifyError) {
+        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+          code: RESPONSE_CODES.UNAUTHORIZED,
+          message: '无效的访问令牌'
+        });
+      }
+    }
 
     // 检查是否为管理员token
     if (decoded.type === 'admin') {

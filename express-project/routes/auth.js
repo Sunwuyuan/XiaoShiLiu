@@ -804,9 +804,17 @@ router.post('/logout', authenticateToken, async (req, res) => {
 
     console.log(`用户退出成功 - 用户ID: ${userId}`);
 
-    // 清除所有认证相关的Cookie
-    res.clearCookie('token', { path: '/' });
-    res.clearCookie('refresh_token', { path: '/' });
+    // 清除所有认证相关的Cookie（使用与设置时相同的选项）
+    const isProduction = config.server.env === 'production';
+    const clearOptions = {
+      path: '/',
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'strict' : 'lax'
+    };
+    
+    res.clearCookie('token', clearOptions);
+    res.clearCookie('refresh_token', clearOptions);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -1241,9 +1249,19 @@ router.post('/admin/logout', authenticateToken, async (req, res) => {
       [adminId.toString(), token]
     );
 
-    // 清除管理员认证Cookie
-    res.clearCookie('admin_token', { path: '/' });
-    res.clearCookie('admin_refresh_token', { path: '/' });
+    console.log(`管理员退出成功 - 管理员ID: ${adminId}`);
+
+    // 清除管理员认证Cookie（使用与设置时相同的选项）
+    const isProduction = config.server.env === 'production';
+    const clearOptions = {
+      path: '/',
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'strict' : 'lax'
+    };
+    
+    res.clearCookie('admin_token', clearOptions);
+    res.clearCookie('admin_refresh_token', clearOptions);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,

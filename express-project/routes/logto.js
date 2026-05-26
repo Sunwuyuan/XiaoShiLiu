@@ -345,23 +345,25 @@ router.post('/callback', async (req, res) => {
       logto_id: user.logto_id
     });
     
-    // 设置最严格的HttpOnly Cookie
+    // 设置用户HttpOnly Cookie
     const isProduction = config.server.env === 'production';
     
-    res.cookie('token', accessToken, {
+    // 根据环境配置不同的Cookie策略
+    const userCookieOptions = {
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      sameSite: isProduction ? 'strict' : 'lax',  // 开发环境用lax
+      maxAge: 7 * 24 * 60 * 60 * 1000,  // 7天
       path: '/'
-    });
+    };
+    
+    console.log('🍪 设置用户token Cookie (用户登录)');
+    
+    res.cookie('token', accessToken, userCookieOptions);
     
     res.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-      path: '/'
+      ...userCookieOptions,
+      maxAge: 30 * 24 * 60 * 60 * 1000  // 30天
     });
 
     res.json({
@@ -624,23 +626,53 @@ router.post('/admin/callback', async (req, res) => {
       permissionsCount: permissions.length
     });
     
-    // 设置最严格的管理员HttpOnly Cookie
+    // 🔍 生产环境调试：打印Token和Secret信息
+    const { JWT_SECRET } = require('../config/config');
+    console.log('\n🔑 ===== 登录成功 - Token生成信息 =====');
+    console.log('📅 时间:', new Date().toISOString());
+    console.log('🔐 JWT Secret:');
+    console.log('   长度:', JWT_SECRET.length);
+    console.log('   值:', JWT_SECRET);
+    console.log('🎫 生成的AccessToken:');
+    console.log('   长度:', accessToken.length);
+    console.log('   完整值:', accessToken);
+    console.log('🎫 生成的RefreshToken:');
+    console.log('   长度:', refreshToken.length);
+    console.log('   前50字符:', refreshToken.substring(0, 50));
+    console.log('🌐 环境配置:');
+    console.log('   NODE_ENV:', config.server.env);
+    console.log('   是否生产环境:', config.server.env === 'production');
+    console.log('🍪 将要设置的Cookie选项:');
+    
+    // 设置管理员HttpOnly Cookie
     const isProduction = config.server.env === 'production';
     
-    res.cookie('admin_token', accessToken, {
+    // 根据环境配置不同的Cookie策略
+    // 开发环境：使用 lax 模式确保Cookie能正常传递
+    // 生产环境：使用 strict 模式提供最高安全性
+    const cookieOptions = {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: 'strict',
+      secure: isProduction,  // 生产环境必须用HTTPS
+      sameSite: isProduction ? 'strict' : 'lax',  // 开发环境用lax避免问题
       maxAge: 7 * 24 * 60 * 60 * 1000,  // 7天
-      path: '/'
-    });
+      path: '/',
+      // 明确设置domain，确保Cookie在正确的域下生效
+      domain: undefined  // 不设置domain，让浏览器自动使用当前域
+    };
+    
+    console.log('   httpOnly:', cookieOptions.httpOnly);
+    console.log('   secure:', cookieOptions.secure, '(生产环境应该为true)');
+    console.log('   sameSite:', cookieOptions.sameSite, '(生产环境应该是strict)');
+    console.log('   maxAge:', cookieOptions.maxAge, 'ms (', cookieOptions.maxAge / (1000*60*60*24), '天)');
+    console.log('   path:', cookieOptions.path);
+    console.log('   domain:', cookieOptions.domain || '(未设置，使用默认)');
+    console.log('🔑 ===== Token生成结束 =====\n');
+    
+    res.cookie('admin_token', accessToken, cookieOptions);
     
     res.cookie('admin_refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000,  // 30天
-      path: '/'
+      ...cookieOptions,
+      maxAge: 30 * 24 * 60 * 60 * 1000  // 30天
     });
 
     res.json({
