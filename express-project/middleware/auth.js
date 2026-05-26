@@ -35,6 +35,9 @@ async function authenticateToken(req, res, next) {
   try {
     const token = extractTokenFromHeader(req);
 
+    // 用于存储解码后的token
+    let decoded;
+
     // 🔍 详细调试日志 - 帮助定位生产环境问题
     if (req.path && (req.path.includes('/admin') || req.path.includes('/me'))) {
       console.log('\n🔐 ===== 认证调试信息 =====');
@@ -80,7 +83,6 @@ async function authenticateToken(req, res, next) {
       console.log('   是否为默认值?:', jwtSecret ? jwtSecret.includes('xiaoshiliu_secret_key') : false);
       
       // 验证token
-      let decoded;
       try {
         decoded = verifyToken(token);
         console.log('✅ Token解码成功:');
@@ -115,7 +117,6 @@ async function authenticateToken(req, res, next) {
         });
       }
       
-      let decoded;
       try {
         decoded = verifyToken(token);
       } catch (verifyError) {
