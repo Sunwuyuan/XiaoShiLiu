@@ -302,7 +302,7 @@ const menuItems = computed(() => {
     { path: '/admin/collections', title: '收藏管理', icon: 'collect', permission: 'collections:view' },
     { path: '/admin/follows', title: '关注管理', icon: 'follow', permission: 'follows:view' },
     { path: '/admin/notifications', title: '通知管理', icon: 'notification', permission: 'notifications:view' },
-    { path: '/admin/sessions', title: '用户会话管理', icon: 'setting', permission: 'sessions:view' },
+    { path: '/admin/sessions', title: '用户会话管理', icon: 'setting', permission: 'user_sessions:view' },
     { path: '/admin/admin-sessions', title: '管理员会话管理', icon: 'setting', permission: 'admin_sessions:view' },
     { path: '/admin/audit', title: '认证管理', icon: 'verified', permission: 'audit:view' },
   ]

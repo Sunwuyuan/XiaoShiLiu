@@ -1203,20 +1203,6 @@ const likesCrudConfig = {
 // 生成点赞CRUD处理器
 const likesHandlers = createCrudHandlers(likesCrudConfig)
 
-// 临时测试接口 - 检查用户数据
-router.get('/test-users', adminAuth, async (req, res) => {
-  try {
-    const { pool } = require('../config/config')
-    const [users] = await pool.execute(
-      'SELECT id, user_id, nickname FROM users WHERE id IN (SELECT DISTINCT user_id FROM likes LIMIT 10)'
-    )
-    res.json({ code: RESPONSE_CODES.SUCCESS, data: users })
-  } catch (error) {
-    console.error('测试用户数据失败:', error)
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: '服务器错误' })
-  }
-})
-
 // 点赞路由
 router.get('/likes', adminAuth, requirePermission('likes:view'), async (req, res) => {
   try {
@@ -2250,7 +2236,9 @@ router.post('/users', adminAuth, requirePermission('users:edit'), usersHandlers.
 router.put('/users/:id', adminAuth, requirePermission('users:edit'), usersHandlers.update)
 router.delete('/users/:id', adminAuth, requirePermission('users:delete'), usersHandlers.deleteOne)
 router.delete('/users', adminAuth, requirePermission('users:delete'), usersHandlers.deleteMany)
-router.post('/users/:id/ban', adminAuth, requirePermission('users:ban'), async (req, res) => {
+
+// 更新用户is_active状态的辅助函数
+async function updateUserActiveStatus(userId, active, operatorId) {
   try {
     await pool.execute(
       'UPDATE users SET is_active = ? WHERE id = ?',
@@ -2296,7 +2284,7 @@ async function revokeExistingBans(userId, operatorId) {
 }
 
 // 用户封禁操作
-router.post('/users/:id/ban', adminAuth, async (req, res) => {
+router.post('/users/:id/ban', adminAuth, requirePermission('users:ban'), async (req, res) => {
   try {
     const userId = req.params.id
     const { reason, end_time } = req.body
@@ -2568,15 +2556,15 @@ const adminsCrudConfig = {
 const adminsHandlers = createCrudHandlers(adminsCrudConfig)
 
 // 管理员CRUD路由
-router.post('/admins', adminAuth, adminsHandlers.create)
-router.put('/admins/:id', adminAuth, adminsHandlers.update)
-router.delete('/admins/:id', adminAuth, adminsHandlers.deleteOne)
-router.delete('/admins', adminAuth, adminsHandlers.deleteMany)
-router.get('/admins/:id', adminAuth, adminsHandlers.getOne)
-router.get('/admins', adminAuth, adminsHandlers.getList)
+router.post('/admins', adminAuth, requirePermission('admins:create'), adminsHandlers.create)
+router.put('/admins/:id', adminAuth, requirePermission('admins:edit'), adminsHandlers.update)
+router.delete('/admins/:id', adminAuth, requirePermission('admins:delete'), adminsHandlers.deleteOne)
+router.delete('/admins', adminAuth, requirePermission('admins:delete'), adminsHandlers.deleteMany)
+router.get('/admins/:id', adminAuth, requirePermission('admins:view'), adminsHandlers.getOne)
+router.get('/admins', adminAuth, requirePermission('admins:view'), adminsHandlers.getList)
 
 // 监控页面API - 获取最近动态
-router.get('/monitor/activities', adminAuth, async (req, res) => {
+router.get('/monitor/activities', adminAuth, requirePermission('monitor:view'), async (req, res) => {
   try {
     const activities = []
 
@@ -3247,16 +3235,5 @@ router.post('/categories', adminAuth, requirePermission('categories:create'), ca
 router.put('/categories/:id', adminAuth, requirePermission('categories:edit'), categoriesHandlers.update)
 router.delete('/categories/:id', adminAuth, requirePermission('categories:delete'), categoriesHandlers.deleteOne)
 router.delete('/categories', adminAuth, requirePermission('categories:delete'), categoriesHandlers.deleteMany)
-      message: '获取成功',
-      ...result
-    })
-  } catch (err) {
-    console.error('获取分类列表失败:', err)
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.SERVER_ERROR,
-      message: err.message || '获取分类列表失败'
-    })
-  }
-})
 
 module.exports = router
