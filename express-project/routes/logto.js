@@ -357,8 +357,6 @@ router.post('/callback', async (req, res) => {
       path: '/'
     };
     
-    console.log('🍪 设置用户token Cookie (用户登录)');
-    
     res.cookie('token', accessToken, userCookieOptions);
     
     res.cookie('refresh_token', refreshToken, {
@@ -626,31 +624,9 @@ router.post('/admin/callback', async (req, res) => {
       permissionsCount: permissions.length
     });
     
-    // 🔍 生产环境调试：打印Token和Secret信息
-    const jwtSecret = config.jwt.secret;
-    console.log('\n🔑 ===== 登录成功 - Token生成信息 =====');
-    console.log('📅 时间:', new Date().toISOString());
-    console.log('🔐 JWT Secret:');
-    console.log('   长度:', jwtSecret ? jwtSecret.length : 0);
-    console.log('   值:', jwtSecret || '(未设置)');
-    console.log('🎫 生成的AccessToken:');
-    console.log('   长度:', accessToken.length);
-    console.log('   完整值:', accessToken);
-    console.log('🎫 生成的RefreshToken:');
-    console.log('   长度:', refreshToken.length);
-    console.log('   前50字符:', refreshToken.substring(0, 50));
-    console.log('🌐 环境配置:');
-    console.log('   NODE_ENV:', config.server.env);
-    console.log('   是否生产环境:', config.server.env === 'production');
-    console.log('🍪 将要设置的Cookie选项:');
-    
     // 设置管理员HttpOnly Cookie
     const isProduction = config.server.env === 'production';
     
-    // 根据环境配置不同的Cookie策略
-    // 开发环境：使用 lax 模式确保Cookie能正常传递
-    // 生产环境：使用 lax 模式（同域情况下使用strict可能导致Cookie不传递）
-    // 🔧 修复：同域情况下使用 lax 更安全，避免Cookie不传递问题
     const cookieOptions = {
       httpOnly: true,
       secure: isProduction,  // 生产环境必须用HTTPS

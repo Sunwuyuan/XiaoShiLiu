@@ -271,7 +271,6 @@ class NotificationHelper {
   static async createAndInsertNotification(pool, params) {
     // 检查是否给自己发通知
     if (params.userId === params.senderId) {
-      console.log('⚠️ 不给自己发通知');
       return null;
     }
 

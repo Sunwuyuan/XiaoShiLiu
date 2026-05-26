@@ -57,7 +57,7 @@ async function saveImageToLocal(fileBuffer, filename, mimetype) {
       url: url
     };
   } catch (error) {
-    console.error('❌ 图片本地保存失败:', error.message);
+    console.error('图片本地保存失败:', error.message);
     return {
       success: false,
       message: error.message || '图片本地保存失败'
@@ -117,7 +117,7 @@ async function saveVideoToLocal(fileBuffer, filename, mimetype) {
       filePath: filePath
     };
   } catch (error) {
-    console.error('❌ 视频本地保存失败:', error.message);
+    console.error('视频本地保存失败:', error.message);
     return {
       success: false,
       message: error.message || '视频本地保存失败'
@@ -136,7 +136,7 @@ async function uploadToImageHost(fileBuffer, filename, mimetype) {
   try {
     // 检查配置是否存在
     if (!config.upload || !config.upload.image || !config.upload.image.imagehost || !config.upload.image.imagehost.apiUrl) {
-      console.error('❌ 图床配置不完整:', config.upload?.image?.imagehost);
+      console.error('图床配置不完整:', config.upload?.image?.imagehost);
       return {
         success: false,
         message: '图床配置不完整，缺少apiUrl'
@@ -216,18 +216,18 @@ async function uploadToImageHost(fileBuffer, filename, mimetype) {
       }
     }
 
-    console.log('❌ 图床返回错误:', response.data);
+    console.log('图床返回错误:', response.data);
     return {
       success: false,
       message: response.data.message || response.data.error || '图床上传失败'
     };
   } catch (error) {
-    console.error('❌ 图床上传失败:', error.message);
+    console.error('图床上传失败:', error.message);
     return {
       success: false,
       message: error.message || '图床上传失败'
     };
-  }
+}
 }
 
 
@@ -427,7 +427,7 @@ async function uploadFileToImageHost(filePath, originalname, mimetype, deleteAft
 
     return result;
   } catch (error) {
-    console.error('❌ 图片上传失败:', error.message);
+    console.error('图片上传失败:', error.message);
     // 确保删除临时文件
     if (deleteAfterUpload && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);

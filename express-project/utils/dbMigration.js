@@ -2,7 +2,7 @@ const { pool } = require('../config/config');
 
 async function checkAndMigrateAdminTable() {
   try {
-    console.log('🔍 检查 admin 表结构...');
+    console.log('检查 admin 表结构...');
 
     const columnsToCheck = [
       { name: 'logto_id', sql: "ALTER TABLE admin ADD COLUMN logto_id VARCHAR(128) DEFAULT NULL COMMENT 'Logto用户唯一ID' AFTER id" },
@@ -15,16 +15,13 @@ async function checkAndMigrateAdminTable() {
 
     for (const col of columnsToCheck) {
       const [rows] = await pool.execute(
-        `SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.COLUMNS 
+        `SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin' AND COLUMN_NAME = ?`,
         [col.name]
       );
 
       if (rows[0].count === 0) {
-        console.log(`  ➕ 添加字段: ${col.name}`);
         await pool.execute(col.sql);
-      } else {
-        console.log(`  ✅ 字段已存在: ${col.name}`);
       }
     }
 
@@ -34,22 +31,15 @@ async function checkAndMigrateAdminTable() {
     );
 
     if (admins.length === 0) {
-      console.log('⚠️  未找到超级管理员，正在设置默认超级管理员...');
-      
       // 将第一个管理员设置为超级管理员
       await pool.execute(
         'UPDATE admin SET is_super = 1, nickname = COALESCE(nickname, username) WHERE id = (SELECT MIN(id) FROM admin)'
       );
-      
-      console.log('✅ 已将第一个管理员设置为超级管理员');
-    } else {
-      console.log(`✅ 超级管理员已存在: ${admins[0].username} (ID: ${admins[0].id})`);
     }
 
-    console.log('✅ Admin 表迁移检查完成\n');
     return true;
   } catch (error) {
-    console.error('❌ Admin 表迁移失败:', error.message);
+    console.error('Admin 表迁移失败:', error.message);
     return false;
   }
 }

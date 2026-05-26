@@ -26,7 +26,7 @@ function extractLocalFilePath(url) {
     
     return null;
   } catch (error) {
-    console.error(`❌ 提取文件路径失败: ${url}`, error.message);
+    console.error('提取文件路径失败:', url, error.message);
     return null;
   }
 }
@@ -39,7 +39,6 @@ function extractLocalFilePath(url) {
 async function deleteLocalFile(filePath) {
   try {
     if (!filePath || typeof filePath !== 'string') {
-      console.warn('⚠️ 无效的文件路径');
       return false;
     }
 
@@ -47,7 +46,7 @@ async function deleteLocalFile(filePath) {
     const projectRoot = process.cwd();
     const resolvedPath = path.resolve(filePath);
     if (!resolvedPath.startsWith(projectRoot)) {
-      console.error(`❌ 安全检查失败，文件路径超出项目范围: ${filePath}`);
+      console.error('安全检查失败，文件路径超出项目范围:', filePath);
       return false;
     }
 
@@ -55,10 +54,10 @@ async function deleteLocalFile(filePath) {
       fs.unlinkSync(filePath);
       return true;
     } else {
-      return true; // 文件不存在也算成功
+      return true;
     }
   } catch (error) {
-    console.error(`❌ 删除视频文件失败: ${filePath}`, error.message);
+    console.error('删除视频文件失败:', filePath, error.message);
     return false;
   }
 }
@@ -97,7 +96,7 @@ async function cleanupVideoFiles(videoUrls) {
     } catch (error) {
       failedCount++;
       errors.push(`处理文件时出错 ${url}: ${error.message}`);
-      console.error(`❌ 处理视频文件时出错: ${url}`, error.message);
+      console.error('处理视频文件时出错:', url, error.message);
     }
   }
 
@@ -149,7 +148,7 @@ async function cleanupCoverFiles(coverUrls) {
     } catch (error) {
       failedCount++;
       errors.push(`处理封面文件时出错 ${url}: ${error.message}`);
-      console.error(`❌ 处理封面文件时出错: ${url}`, error.message);
+      console.error('处理封面文件时出错:', url, error.message);
     }
   }
 
@@ -191,7 +190,7 @@ async function batchCleanupFiles(videoUrls = [], coverUrls = []) {
         allErrors: [...videoResult.errors, ...coverResult.errors]
     };
   } catch (error) {
-    console.error('❌ 批量文件清理失败:', error.message);
+    console.error('批量文件清理失败:', error.message);
     return {
       success: false,
       videoResult: { success: false, deletedCount: 0, failedCount: 0, errors: [error.message] },

@@ -334,7 +334,7 @@ const loadAdmins = async () => {
     })
     const result = await response.json()
     if (result.code === 200) {
-      admins.value = result.data.data || result.data
+      admins.value = result.data.items || []
     }
   } catch (error) {
     console.error('加载管理员失败:', error)

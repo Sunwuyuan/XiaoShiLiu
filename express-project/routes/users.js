@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
 const { pool } = require('../config/config');
@@ -116,7 +116,6 @@ router.get('/:id/personality-tags', async (req, res) => {
     const [rows] = await pool.execute(query, params);
 
     if (rows.length === 0) {
-      console.log('❌ 用户不存在:', userIdParam);
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
         message: '用户不存在',
@@ -161,7 +160,6 @@ router.get('/:id', async (req, res) => {
     );
 
     if (rows.length === 0) {
-      console.log('❌ 用户不存在:', userIdParam);
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
         message: '用户不存在',
