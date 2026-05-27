@@ -7,18 +7,26 @@ const config = require('../config/config');
  * @returns {String|null} token
  */
 function extractTokenFromHeader(req) {
+  // 判断是否为管理员路径
+  const isAdminPath = req.path && (req.path.startsWith('/admin') || req.path.startsWith('/api/admin'))
+  
+  // 如果是管理员路径，优先检查管理员token
+  if (isAdminPath && req.cookies && req.cookies.admin_token) {
+    return req.cookies.admin_token;
+  }
+  
   // 优先从Authorization头获取（兼容旧客户端）
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     return authHeader.substring(7);
   }
 
-  // 从Cookie中获取（新的安全方式）
+  // 从Cookie中获取普通用户token（新的安全方式）
   if (req.cookies && req.cookies.token) {
     return req.cookies.token;
   }
 
-  // 管理员token（从Cookie）
+  // 管理员token（从Cookie）- 备用检查
   if (req.cookies && req.cookies.admin_token) {
     return req.cookies.admin_token;
   }

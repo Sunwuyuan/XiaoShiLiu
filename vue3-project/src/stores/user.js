@@ -91,11 +91,6 @@ export const useUserStore = defineStore('user', () => {
       localStorage.removeItem('user_token')
       localStorage.removeItem('user_refresh_token')
 
-      // 清除所有可能的 Cookie (通过后端清除)
-      document.cookie.split(";").forEach(function(c) {
-        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-      });
-
       // 重置未读通知数量
       try {
         const { useNotificationStore } = await import('./notification')
