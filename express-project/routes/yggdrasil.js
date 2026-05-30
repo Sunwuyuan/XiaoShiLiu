@@ -428,9 +428,12 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
 
     const uuid = formatUuid(profile.uuid);
     
+    // UUID 统一使用无符号格式（去掉横线）
+    const unsignedUuid = uuid.replace(/-/g, '');
+
     const texturePayload = {
       timestamp: Date.now(),
-      profileId: uuid,
+      profileId: unsignedUuid,
       profileName: profile.player_name,
       textures: {}
     };
@@ -453,7 +456,7 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
     const base64Value = Buffer.from(JSON.stringify(texturePayload)).toString('base64');
 
     const response = {
-      id: uuid,
+      id: unsignedUuid,
       name: profile.player_name,
       properties: [
         {
