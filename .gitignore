@@ -50,3 +50,7 @@ express-project/uploads/
 # Security audit reports (contain sensitive information)
 SECURITY_AUDIT*.md
 /security-audit*
+
+keys/*
+express-project/keys/private.pem
+express-project/keys/public.pem
