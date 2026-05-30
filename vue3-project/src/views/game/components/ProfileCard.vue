@@ -133,20 +133,22 @@ function copyToClipboard(text) {
 
 <style scoped>
 .profile-card {
-  background: var(--bg-color-secondary);
+  background: var(--bg-color-primary);
   border-radius: 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-color-primary);
   overflow: hidden;
   transition: all 0.2s ease;
 }
 
 .profile-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  background: var(--bg-color-secondary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .profile-card.banned {
   opacity: 0.6;
-  border-color: var(--danger-color);
+  border-color: var(--primary-color);
 }
 
 .card-header {
@@ -154,8 +156,7 @@ function copyToClipboard(text) {
   align-items: center;
   gap: 12px;
   padding: 16px;
-  background: var(--bg-color-tertiary);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color-primary);
 }
 
 .player-avatar {
@@ -163,7 +164,8 @@ function copyToClipboard(text) {
   height: 64px;
   border-radius: 8px;
   image-rendering: pixelated;
-  background: var(--bg-color-primary);
+  background: var(--bg-color-tertiary);
+  flex-shrink: 0;
 }
 
 .player-info {
@@ -180,7 +182,7 @@ function copyToClipboard(text) {
 
 .uuid-text {
   font-size: 12px;
-  color: var(--text-color-secondary);
+  color: var(--text-color-tertiary);
   margin: 0;
   cursor: pointer;
   word-break: break-all;
@@ -197,12 +199,13 @@ function copyToClipboard(text) {
   width: 14px;
   height: 14px;
   opacity: 0.6;
+  flex-shrink: 0;
 }
 
 .ban-badge {
   display: inline-block;
   padding: 2px 8px;
-  background: var(--danger-color);
+  background: var(--primary-color);
   color: white;
   border-radius: 4px;
   font-size: 11px;
@@ -213,6 +216,7 @@ function copyToClipboard(text) {
 .card-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .action-btn {
@@ -225,21 +229,21 @@ function copyToClipboard(text) {
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
-  background: var(--bg-color-secondary);
+  background: transparent;
   color: var(--text-color-secondary);
 }
 
-.action-btn:hover {
-  background: var(--hover-bg-color);
+.action-btn:hover:not(:disabled) {
+  background: var(--bg-color-tertiary);
   color: var(--text-color-primary);
 }
 
-.edit-btn:hover {
+.edit-btn:hover:not(:disabled) {
   color: var(--primary-color);
 }
 
-.delete-btn:hover {
-  color: var(--danger-color);
+.delete-btn:hover:not(:disabled) {
+  color: var(--primary-color);
 }
 
 .action-btn:disabled {
@@ -264,8 +268,9 @@ function copyToClipboard(text) {
   text-align: center;
   margin-bottom: 16px;
   padding: 20px;
-  background: var(--bg-color-primary);
+  background: var(--bg-color-secondary);
   border-radius: 8px;
+  border: 1px solid var(--border-color-secondary);
 }
 
 .skin-image {
@@ -290,6 +295,7 @@ function copyToClipboard(text) {
 
 .label {
   color: var(--text-color-secondary);
+  font-weight: 400;
 }
 
 .value {
@@ -298,7 +304,7 @@ function copyToClipboard(text) {
 }
 
 .cape-status {
-  color: var(--success-color);
+  color: var(--primary-color);
 }
 
 @media (max-width: 480px) {
@@ -310,6 +316,23 @@ function copyToClipboard(text) {
     width: 100%;
     justify-content: flex-end;
     margin-top: 8px;
+  }
+
+  .player-avatar {
+    width: 48px;
+    height: 48px;
+  }
+
+  .player-name {
+    font-size: 14px;
+  }
+
+  .card-body {
+    padding: 12px;
+  }
+
+  .skin-preview {
+    padding: 16px;
   }
 }
 </style>
