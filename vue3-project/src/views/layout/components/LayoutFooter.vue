@@ -46,6 +46,7 @@ const unreadCount = computed(() => notificationStore.unreadCount)
 const footerList = ref([
     { label: 'explore', icon: 'home', path: '/explore' },
     { label: 'publish', icon: 'publish', path: '/publish' },
+    { label: 'game', icon: 'game', path: '/game' },
     { label: 'notification', icon: 'notification', path: '/notification' },
     { label: 'user', icon: 'user', path: '/user' },
 ])

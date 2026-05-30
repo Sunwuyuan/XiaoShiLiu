@@ -46,6 +46,9 @@ const statsRoutes = require('./routes/stats');
 const adminRoutes = require('./routes/admin');
 const categoriesRoutes = require('./routes/categories');
 const filesRoutes = require('./routes/files');
+// 导入MC游戏功能路由
+const yggdrasilRoutes = require('./routes/yggdrasil');
+const gameRoutes = require('./routes/game');
 
 const app = express();
 
@@ -71,6 +74,25 @@ const authLimiter = rateLimit({
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false }
+});
+
+// MC游戏功能速率限制器
+const yggdrasilLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Too Many Requests', errorMessage: '请求过于频繁，请稍后重试' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false }
+});
+
+const gameLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { code: 429, message: '请求过于频繁，请稍后重试' },
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false }
@@ -119,6 +141,9 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/files', filesRoutes);
+// MC游戏功能路由
+app.use('/api/yggdrasil', yggdrasilLimiter, yggdrasilRoutes);
+app.use('/api/game', gameLimiter, gameRoutes);
 
 // 错误处理中间件
 app.use((err, req, res, next) => {

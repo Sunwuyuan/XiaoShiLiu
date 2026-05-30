@@ -22,6 +22,7 @@ const unreadCount = computed(() => notificationStore.unreadCount)
 const menuItems = ref([
   { label: '发现', icon: 'home', path: '/explore' },
   { label: '发布', icon: 'publish', path: '/publish' },
+  { label: '游戏', icon: 'game', path: '/game' },
   { label: '通知', icon: 'notification', path: '/notification' },
   { label: '我', icon: 'avatar', path: '/user' },
   { label: '更多', icon: 'menu', path: '' },
