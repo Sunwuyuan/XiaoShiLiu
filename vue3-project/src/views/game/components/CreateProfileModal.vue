@@ -61,17 +61,17 @@ function validatePlayerName() {
 async function handleSubmit() {
   const nameError = validatePlayerName()
   if (nameError) {
-    messageManager.showError(nameError)
+    messageManager.error(nameError)
     return
   }
 
   if (!password.value || password.value.length < 8) {
-    messageManager.showError('密码长度至少为8位')
+    messageManager.error('密码长度至少为8位')
     return
   }
 
   if (password.value !== confirmPassword.value) {
-    messageManager.showError('两次输入的密码不一致')
+    messageManager.error('两次输入的密码不一致')
     return
   }
 
@@ -86,17 +86,17 @@ async function handleSubmit() {
     if (res.success) {
       emit('created', res.data)
       emit('close')
-      messageManager.showSuccess('角色创建成功！请牢记您的独立密码')
+      messageManager.success('角色创建成功！请牢记您的独立密码')
     } else {
-      messageManager.showError(res.message || '创建失败')
+      messageManager.error(res.message || '创建失败')
     }
   } catch (error) {
     console.error('创建角色失败:', error)
     
     if (error.response?.data?.message) {
-      messageManager.showError(error.response.data.message)
+      messageManager.error(error.response.data.message)
     } else {
-      messageManager.showError('创建失败，请稍后重试')
+      messageManager.error('创建失败，请稍后重试')
     }
   } finally {
     isSubmitting.value = false

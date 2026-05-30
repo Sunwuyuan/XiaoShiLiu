@@ -31,11 +31,11 @@ async function handleDelete() {
     const res = await gameApi.deleteSkin(props.profile.id)
     if (res.success) {
       emit('delete', props.profile.id)
-      messageManager.showSuccess('角色已删除')
+      messageManager.success('角色已删除')
     }
   } catch (error) {
     console.error('删除角色失败:', error)
-    messageManager.showError('删除失败，请稍后重试')
+    messageManager.error('删除失败，请稍后重试')
   } finally {
     isDeleting.value = false
   }
@@ -48,7 +48,7 @@ function handleEditComplete(updatedData) {
 
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).then(() => {
-    messageManager.showSuccess('已复制到剪贴板')
+    messageManager.success('已复制到剪贴板')
   }).catch(err => {
     console.error('复制失败:', err)
   })

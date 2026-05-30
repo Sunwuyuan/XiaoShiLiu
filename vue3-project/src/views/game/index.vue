@@ -41,7 +41,7 @@ async function loadConfig() {
 
 function handleProfileCreated(newProfile) {
   profiles.value.unshift(newProfile)
-  messageManager.showSuccess('角色创建成功！')
+  messageManager.success('角色创建成功！')
 }
 
 function handleProfileUpdated(updatedProfile) {

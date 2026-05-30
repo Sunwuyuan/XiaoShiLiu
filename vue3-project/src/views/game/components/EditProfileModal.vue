@@ -35,12 +35,12 @@ const tabs = [
 
 async function handleUpdateName() {
   if (!newName.value.trim()) {
-    messageManager.showError('玩家名称不能为空')
+    messageManager.error('玩家名称不能为空')
     return
   }
 
   if (newName.value.trim() === props.profile.player_name) {
-    messageManager.showInfo('名称未修改')
+    messageManager.info('名称未修改')
     return
   }
 
@@ -51,13 +51,13 @@ async function handleUpdateName() {
     
     if (res.success) {
       emit('updated', { player_name: newName.value.trim() })
-      messageManager.showSuccess('名称修改成功')
+      messageManager.success('名称修改成功')
     } else {
-      messageManager.showError(res.message || '修改失败')
+      messageManager.error(res.message || '修改失败')
     }
   } catch (error) {
     console.error('修改名称失败:', error)
-    messageManager.showError(error.response?.data?.message || '修改失败')
+    messageManager.error(error.response?.data?.message || '修改失败')
   } finally {
     isSubmitting.value = false
   }
@@ -65,22 +65,22 @@ async function handleUpdateName() {
 
 async function handleUpdatePassword() {
   if (!oldPassword.value || !newPassword.value || !confirmNewPassword.value) {
-    messageManager.showError('请填写所有密码字段')
+    messageManager.error('请填写所有密码字段')
     return
   }
 
   if (newPassword.value.length < 8) {
-    messageManager.showError('新密码长度至少为8位')
+    messageManager.error('新密码长度至少为8位')
     return
   }
 
   if (oldPassword.value === newPassword.value) {
-    messageManager.showError('新密码不能与旧密码相同')
+    messageManager.error('新密码不能与旧密码相同')
     return
   }
 
   if (newPassword.value !== confirmNewPassword.value) {
-    messageManager.showError('两次输入的新密码不一致')
+    messageManager.error('两次输入的新密码不一致')
     return
   }
 
@@ -97,13 +97,13 @@ async function handleUpdatePassword() {
       oldPassword.value = ''
       newPassword.value = ''
       confirmNewPassword.value = ''
-      messageManager.showSuccess('密码修改成功！请使用新密码登录MC客户端')
+      messageManager.success('密码修改成功！请使用新密码登录MC客户端')
     } else {
-      messageManager.showError(res.message || '修改失败')
+      messageManager.error(res.message || '修改失败')
     }
   } catch (error) {
     console.error('修改密码失败:', error)
-    messageManager.showError(error.response?.data?.message || '修改失败')
+    messageManager.error(error.response?.data?.message || '修改失败')
   } finally {
     isSubmitting.value = false
   }
@@ -111,7 +111,7 @@ async function handleUpdatePassword() {
 
 async function handleUploadSkin() {
   if (!skinFile.value) {
-    messageManager.showError('请选择皮肤文件')
+    messageManager.error('请选择皮肤文件')
     return
   }
 
@@ -123,13 +123,13 @@ async function handleUploadSkin() {
     if (res.success) {
       emit('updated', res.data)
       skinFile.value = null
-      messageManager.showSuccess('皮肤上传成功！')
+      messageManager.success('皮肤上传成功！')
     } else {
-      messageManager.showError(res.message || '上传失败')
+      messageManager.error(res.message || '上传失败')
     }
   } catch (error) {
     console.error('上传皮肤失败:', error)
-    messageManager.showError(error.response?.data?.message || '上传失败，请稍后重试')
+    messageManager.error(error.response?.data?.message || '上传失败，请稍后重试')
   } finally {
     isSubmitting.value = false
   }
@@ -145,13 +145,13 @@ async function handleDeleteSkin() {
 
     if (res.success) {
       emit('updated', { skin_url: null, skin_model: 'classic' })
-      messageManager.showSuccess('皮肤已删除')
+      messageManager.success('皮肤已删除')
     } else {
-      messageManager.showError(res.message || '删除失败')
+      messageManager.error(res.message || '删除失败')
     }
   } catch (error) {
     console.error('删除皮肤失败:', error)
-    messageManager.showError(error.response?.data?.message || '删除失败')
+    messageManager.error(error.response?.data?.message || '删除失败')
   }
 }
 
@@ -160,12 +160,12 @@ function handleSkinChange(event) {
   
   if (file && file.type === 'image/png') {
     if (file.size > 500 * 1024) {
-      messageManager.showError('文件大小超过500KB限制')
+      messageManager.error('文件大小超过500KB限制')
       return
     }
     skinFile.value = file
   } else {
-    messageManager.showError('只支持PNG格式的图片文件')
+    messageManager.error('只支持PNG格式的图片文件')
   }
 }
 
@@ -174,18 +174,18 @@ function handleCapeChange(event) {
 
   if (file && file.type === 'image/png') {
     if (file.size > 500 * 1024) {
-      messageManager.showError('文件大小超过500KB限制')
+      messageManager.error('文件大小超过500KB限制')
       return
     }
     capeFile.value = file
   } else {
-    messageManager.showError('只支持PNG格式的图片文件')
+    messageManager.error('只支持PNG格式的图片文件')
   }
 }
 
 async function handleUploadCape() {
   if (!capeFile.value) {
-    messageManager.showError('请选择披风文件')
+    messageManager.error('请选择披风文件')
     return
   }
 
@@ -197,13 +197,13 @@ async function handleUploadCape() {
     if (res.success) {
       emit('updated', res.data)
       capeFile.value = null
-      messageManager.showSuccess('披风上传成功！')
+      messageManager.success('披风上传成功！')
     } else {
-      messageManager.showError(res.message || '上传失败')
+      messageManager.error(res.message || '上传失败')
     }
   } catch (error) {
     console.error('上传披风失败:', error)
-    messageManager.showError(error.response?.data?.message || '上传失败，请稍后重试')
+    messageManager.error(error.response?.data?.message || '上传失败，请稍后重试')
   } finally {
     isSubmitting.value = false
   }
@@ -219,13 +219,13 @@ async function handleDeleteCape() {
 
     if (res.success) {
       emit('updated', { cape_url: null })
-      messageManager.showSuccess('披风已删除')
+      messageManager.success('披风已删除')
     } else {
-      messageManager.showError(res.message || '删除失败')
+      messageManager.error(res.message || '删除失败')
     }
   } catch (error) {
     console.error('删除披风失败:', error)
-    messageManager.showError(error.response?.data?.message || '删除失败')
+    messageManager.error(error.response?.data?.message || '删除失败')
   }
 }
 </script>
