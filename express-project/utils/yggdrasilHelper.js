@@ -3,15 +3,87 @@
  * 提供 Token 管理、密码加密、UUID 生成、纹理编码等核心功能
  * 
  * @author zhaishis
- * @version v1.0.0
+ * @version v1.1.0
  */
 
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
 const { pool } = require('../config/config');
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+
+// RSA 签名密钥路径
+const PRIVATE_KEY_PATH = path.join(__dirname, '..', 'keys', 'yggdrasil-private.pem');
+const PUBLIC_KEY_PATH = path.join(__dirname, '..', 'keys', 'yggdrasil-public.pem');
+
+// 缓存私钥和公钥
+let privateKeyCache = null;
+let publicKeyCache = null;
+
+/**
+ * 加载 RSA 私钥
+ */
+function loadPrivateKey() {
+  if (privateKeyCache) return privateKeyCache;
+  if (fs.existsSync(PRIVATE_KEY_PATH)) {
+    privateKeyCache = fs.readFileSync(PRIVATE_KEY_PATH, 'utf8');
+    return privateKeyCache;
+  }
+  return null;
+}
+
+/**
+ * 加载 RSA 公钥
+ */
+function loadPublicKey() {
+  if (publicKeyCache) return publicKeyCache;
+  if (fs.existsSync(PUBLIC_KEY_PATH)) {
+    publicKeyCache = fs.readFileSync(PUBLIC_KEY_PATH, 'utf8');
+    return publicKeyCache;
+  }
+  return null;
+}
+
+/**
+ * 对数据进行 RSA-SHA256 签名
+ * @param {string} data - 要签名的数据（base64 编码的纹理数据）
+ * @returns {string|null} - 签名结果（base64 编码），如果私钥不存在则返回 null
+ */
+function signData(data) {
+  const privateKey = loadPrivateKey();
+  if (!privateKey) {
+    console.warn('[Yggdrasil] 私钥不存在，跳过签名');
+    return null;
+  }
+  
+  try {
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(data);
+    sign.end();
+    return sign.sign(privateKey, 'base64');
+  } catch (error) {
+    console.error('[Yggdrasil] 签名失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 获取公钥字符串（用于 API 元数据）
+ * @returns {string|null} - 公钥字符串（去除 PEM 头尾标记），如果不存在则返回 null
+ */
+function getSignaturePublicKey() {
+  const publicKey = loadPublicKey();
+  if (!publicKey) return null;
+  
+  // 去除 PEM 头尾标记和换行符
+  return publicKey
+    .replace('-----BEGIN PUBLIC KEY-----', '')
+    .replace('-----END PUBLIC KEY-----', '')
+    .replace(/\s/g, '');
+}
 
 const ACCESS_TOKEN_EXPIRES_IN = '7d';
 const REFRESH_TOKEN_EXPIRES_IN = '30d';
@@ -86,7 +158,12 @@ function encodeTextures(textures) {
     };
   }
 
-  return Buffer.from(JSON.stringify(payload)).toString('base64');
+  const base64Value = Buffer.from(JSON.stringify(payload)).toString('base64');
+  
+  // 对纹理数据进行签名
+  const signature = signData(base64Value);
+  
+  return { value: base64Value, signature };
 }
 
 function isValidPlayerName(name) {
@@ -205,6 +282,30 @@ async function getProfileById(profileId) {
 
 async function saveTokens(profileId, accessToken, refreshToken, clientToken, ipAddress = null, userAgent = null) {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  
+  // 检查该角色的令牌数量，超过 10 个则删除最旧的
+  const MAX_TOKENS = 10;
+  const [countRows] = await pool.execute(
+    `SELECT COUNT(*) as count FROM yggdrasil_tokens WHERE profile_id = ? AND expires_at > NOW()`,
+    [profileId]
+  );
+  
+  if (countRows[0].count >= MAX_TOKENS) {
+    // 删除最旧的令牌
+    const [oldTokens] = await pool.execute(
+      `SELECT id FROM yggdrasil_tokens WHERE profile_id = ? AND expires_at > NOW() ORDER BY created_at ASC LIMIT ?`,
+      [profileId, countRows[0].count - MAX_TOKENS + 1]
+    );
+    
+    if (oldTokens.length > 0) {
+      const idsToDelete = oldTokens.map(t => t.id);
+      await pool.execute(
+        `DELETE FROM yggdrasil_tokens WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
+        idsToDelete
+      );
+      console.log(`[Yggdrasil] 角色 ${profileId} 令牌数量超过限制，已删除 ${oldTokens.length} 个旧令牌`);
+    }
+  }
 
   await pool.execute(
     `INSERT INTO yggdrasil_tokens (profile_id, access_token, refresh_token, client_token, expires_at, ip_address, user_agent)
@@ -238,6 +339,31 @@ async function findTokenByRefreshToken(refreshToken) {
   );
 
   return rows[0] || null;
+}
+
+// 检查 Token 是否暂时失效（角色改名后）
+async function isTokenTemporarilyInvalidated(accessToken) {
+  const [rows] = await pool.execute(
+    `SELECT is_temporarily_invalidated FROM yggdrasil_tokens
+     WHERE access_token = ? AND expires_at > NOW()
+     LIMIT 1`,
+    [accessToken]
+  );
+
+  return rows[0]?.is_temporarily_invalidated === 1;
+}
+
+// 将角色的所有 Token 标记为暂时失效（角色改名后调用）
+async function markTokensAsTemporarilyInvalidated(profileId) {
+  const [result] = await pool.execute(
+    `UPDATE yggdrasil_tokens 
+     SET is_temporarily_invalidated = 1 
+     WHERE profile_id = ? AND expires_at > NOW()`,
+    [profileId]
+  );
+
+  console.log(`[Yggdrasil] 角色 ${profileId} 的 ${result.affectedRows} 个 Token 被标记为暂时失效`);
+  return result.affectedRows;
 }
 
 async function invalidateAllTokens(profileId) {
@@ -341,6 +467,8 @@ module.exports = {
   saveTokens,
   findTokenByAccessToken,
   findTokenByRefreshToken,
+  isTokenTemporarilyInvalidated,
+  markTokensAsTemporarilyInvalidated,
   invalidateAllTokens,
   invalidateToken,
   cleanupExpiredTokens,

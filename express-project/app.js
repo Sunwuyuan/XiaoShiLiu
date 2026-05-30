@@ -18,6 +18,8 @@ const config = require('./config/config');
 const { HTTP_STATUS, RESPONSE_CODES } = require('./constants');
 // 导入自动解封功能
 const { startAutoUnbanService } = require('./utils/autoUnban');
+// 导入 Yggdrasil Token 清理功能
+const { cleanupExpiredTokens } = require('./utils/yggdrasilHelper');
 // 导入数据库迁移功能
 const { checkAndMigrateAdminTable } = require('./utils/dbMigration');
 
@@ -195,6 +197,26 @@ app.listen(PORT, async () => {
   
   // 自动检查并迁移数据库
   await checkAndMigrateAdminTable();
+
+  // 启动定时清理过期 Yggdrasil Token 任务（每小时执行一次）
+  setInterval(async () => {
+    try {
+      const count = await cleanupExpiredTokens();
+      if (count > 0) {
+        console.log(`[Yggdrasil] 定时清理完成，删除了 ${count} 个过期 Token`);
+      }
+    } catch (error) {
+      console.error('[Yggdrasil] 定时清理过期 Token 失败:', error);
+    }
+  }, 60 * 60 * 1000); // 每小时执行一次
+
+  // 立即执行一次清理
+  try {
+    const count = await cleanupExpiredTokens();
+    console.log(`[Yggdrasil] 初始清理完成，删除了 ${count} 个过期 Token`);
+  } catch (error) {
+    console.error('[Yggdrasil] 初始清理过期 Token 失败:', error);
+  }
 });
 
 module.exports = app;

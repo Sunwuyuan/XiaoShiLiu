@@ -12,6 +12,7 @@ const router = express.Router();
 const multer = require('multer');
 const crypto = require('crypto');
 const axios = require('axios');
+const sharp = require('sharp');
 const { HTTP_STATUS, RESPONSE_CODES } = require('../constants');
 const { authenticateToken } = require('../middleware/auth');
 const { uploadImage } = require('../utils/uploadHelper');
@@ -26,7 +27,8 @@ const {
   createFileHash,
   auditLog,
   recordExists,
-  isUnique
+  isUnique,
+  markTokensAsTemporarilyInvalidated
 } = require('../utils/yggdrasilHelper');
 const { pool } = require('../config/config');
 
@@ -216,17 +218,21 @@ router.put('/profile/:id/name', authenticateToken, async (req, res) => {
       [new_name.trim(), profileId]
     );
 
+    // 角色改名后，将该角色的所有 Token 标记为暂时失效
+    // 这样启动器会刷新令牌，获取到新的角色名称
+    await markTokensAsTemporarilyInvalidated(profileId);
+
     await auditLog('NAME_CHANGE', req.user.id, profileId, req.ip, {
       old_name: oldName,
       new_name: new_name.trim()
     });
 
-    console.log(`[Game] 角色 ${oldName} 改名为 ${new_name}`);
+    console.log(`[Game] 角色 ${oldName} 改名为 ${new_name}，相关 Token 已标记为暂时失效`);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       data: { old_name: oldName, new_name: new_name.trim() },
-      message: '名称修改成功'
+      message: '名称修改成功，请使用新名称重新登录游戏'
     });
 
   } catch (error) {
@@ -335,8 +341,24 @@ router.post('/profile/:id/skin', authenticateToken, upload.single('skin'), async
       });
     }
 
-    const fileName = `${profile.uuid}_skin.png`;
-    const result = await uploadImage(req.file.buffer, fileName, 'image/png');
+    // 安全处理：去除所有元数据，防止 PNG Bomb 和恶意代码
+    let processedBuffer;
+    try {
+      processedBuffer = await sharp(req.file.buffer)
+        .png()
+        .toBuffer();
+    } catch (error) {
+      console.error('[Game] 皮肤处理失败:', error);
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '皮肤文件处理失败'
+      });
+    }
+
+    // 使用完整 hash 作为文件名（规范要求）
+    const textureHash = createFileHash(processedBuffer);
+    const fileName = `${textureHash}.png`;
+    const result = await uploadImage(processedBuffer, fileName, 'image/png');
 
     if (!result.success) {
       return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
@@ -349,8 +371,6 @@ router.post('/profile/:id/skin', authenticateToken, upload.single('skin'), async
       `UPDATE mc_profiles SET skin_url = ?, skin_model = ? WHERE id = ?`,
       [result.url, model, profileId]
     );
-
-    const textureHash = createFileHash(req.file.buffer);
 
     await pool.execute(
       `INSERT IGNORE INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata)
@@ -455,8 +475,24 @@ router.post('/profile/:id/cape', authenticateToken, upload.single('cape'), async
       });
     }
 
-    const fileName = `${profile.uuid}_cape.png`;
-    const result = await uploadImage(req.file.buffer, fileName, 'image/png');
+    // 安全处理：去除所有元数据，防止 PNG Bomb 和恶意代码
+    let processedBuffer;
+    try {
+      processedBuffer = await sharp(req.file.buffer)
+        .png()
+        .toBuffer();
+    } catch (error) {
+      console.error('[Game] 披风处理失败:', error);
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '披风文件处理失败'
+      });
+    }
+
+    // 使用完整 hash 作为文件名（规范要求）
+    const textureHash = createFileHash(processedBuffer);
+    const fileName = `${textureHash}.png`;
+    const result = await uploadImage(processedBuffer, fileName, 'image/png');
 
     if (!result.success) {
       return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
@@ -469,8 +505,6 @@ router.post('/profile/:id/cape', authenticateToken, upload.single('cape'), async
       `UPDATE mc_profiles SET cape_url = ? WHERE id = ?`,
       [result.url, profileId]
     );
-
-    const textureHash = createFileHash(req.file.buffer);
 
     await pool.execute(
       `INSERT IGNORE INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata)

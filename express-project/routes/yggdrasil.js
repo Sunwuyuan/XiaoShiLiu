@@ -27,6 +27,7 @@ const {
   saveTokens,
   findTokenByAccessToken,
   findTokenByRefreshToken,
+  isTokenTemporarilyInvalidated,
   invalidateAllTokens,
   invalidateToken,
   getProfileByUuid,
@@ -35,7 +36,9 @@ const {
   auditLog,
   buildAuthResponse,
   buildErrorResponse,
-  createFileHash
+  createFileHash,
+  signData,
+  getSignaturePublicKey
 } = require('../utils/yggdrasilHelper');
 
 // 内存存储用于serverId验证（生产环境建议使用Redis）
@@ -73,16 +76,8 @@ router.get('/', (req, res) => {
   
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   
-  // 从文件路径读取公钥
-  const publicKeyPath = process.env.YGGDRASIL_PUBLIC_KEY_PATH || './keys/public.pem';
-  let signaturePublicKey = '';
-  
-  try {
-    signaturePublicKey = fs.readFileSync(publicKeyPath, 'utf8');
-  } catch (err) {
-    console.error('[Yggdrasil] 无法读取公钥文件:', publicKeyPath, err.message);
-    signaturePublicKey = '';
-  }
+  // 获取签名公钥（从 keys/yggdrasil-public.pem 读取）
+  const signaturePublicKey = getSignaturePublicKey() || '';
 
   // 从 .env 读取额外的皮肤域名白名单（逗号分隔）
   const extraSkinDomains = process.env.SKIN_DOMAINS 
@@ -277,6 +272,12 @@ router.post('/authserver/validate', async (req, res) => {
       return res.status(403).end();
     }
 
+    // 检查 Token 是否暂时失效（角色改名后）
+    if (tokenRecord.is_temporarily_invalidated === 1) {
+      console.log(`[Yggdrasil] Token 已暂时失效（角色改名后），需要刷新`);
+      return res.status(403).end();
+    }
+
     res.status(204).end();
 
   } catch (error) {
@@ -454,6 +455,9 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
     }
 
     const base64Value = Buffer.from(JSON.stringify(texturePayload)).toString('base64');
+    
+    // 对纹理数据进行签名
+    const signature = signData(base64Value);
 
     const response = {
       id: unsignedUuid,
@@ -462,14 +466,18 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
         {
           name: 'textures',
           value: base64Value,
-          signature: ''
+          signature: signature || ''
+        },
+        {
+          name: 'uploadableTextures',
+          value: 'skin,cape'
         }
       ]
     };
 
     serverIdCache.delete(serverId);
 
-    console.log(`[Yggdrasil] 验证成功: ${username}`);
+    console.log(`[Yggdrasil] 验证成功: ${username}${signature ? ' (已签名)' : ''}`);
     res.json(response);
 
   } catch (error) {
@@ -481,7 +489,8 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
 router.get('/sessionserver/session/minecraft/profile/:uuid', async (req, res) => {
   try {
     const uuid = req.params.uuid;
-    const unsignedParam = req.query.unsigned === 'true' || req.query.unsigned === undefined;
+    // unsigned 默认为 true，即不包含签名
+    const unsignedParam = req.query.unsigned !== 'false';
 
     const profile = await getProfileByUuid(uuid);
 
@@ -513,7 +522,8 @@ router.get('/sessionserver/session/minecraft/profile/:uuid', async (req, res) =>
     }
 
     const base64Value = Buffer.from(JSON.stringify(texturePayload)).toString('base64');
-
+    
+    // 构建响应
     const response = {
       id: uuid.replace(/-/g, ''),
       name: profile.player_name,
@@ -521,12 +531,18 @@ router.get('/sessionserver/session/minecraft/profile/:uuid', async (req, res) =>
         {
           name: 'textures',
           value: base64Value
+        },
+        {
+          name: 'uploadableTextures',
+          value: 'skin,cape'
         }
       ]
     };
 
+    // 仅当 unsigned=false 时才包含签名
     if (!unsignedParam) {
-      response.properties[0].signature = '';
+      const signature = signData(base64Value);
+      response.properties[0].signature = signature || '';
     }
 
     res.json(response);
@@ -710,12 +726,12 @@ router.put('/api/user/profile/:uuid/:textureType', verifyTextureAuth, upload.sin
 
     const fileHash = createFileHash(req.file.buffer);
 
+    // 安全处理：去除所有元数据，防止 PNG Bomb 和恶意代码
     let processedBuffer;
     try {
       processedBuffer = await sharp(req.file.buffer)
         .png()
-        .withMetadata({})
-        .toBuffer();
+        .toBuffer(); // 不保留任何元数据
     } catch (error) {
       console.error('[Yggdrasil] 图片处理失败:', error);
       return res.status(400).json(buildErrorResponse(
@@ -724,9 +740,10 @@ router.put('/api/user/profile/:uuid/:textureType', verifyTextureAuth, upload.sin
       ));
     }
 
+    // 使用完整 hash 作为文件名（规范要求）
     const uploadResult = await uploadFile(
       processedBuffer,
-      `${textureType}_${fileHash.substring(0, 16)}.png`,
+      `${fileHash}.png`,
       'image/png'
     );
 
