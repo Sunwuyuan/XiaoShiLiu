@@ -84,6 +84,11 @@ router.get('/', (req, res) => {
     signaturePublicKey = '';
   }
 
+  // 从 .env 读取额外的皮肤域名白名单（逗号分隔）
+  const extraSkinDomains = process.env.SKIN_DOMAINS 
+    ? process.env.SKIN_DOMAINS.split(',').map(d => d.trim()).filter(Boolean)
+    : [];
+
   res.json({
     meta: {
       serverName: '悦社社区 Yggdrasil 验证服务',
@@ -102,7 +107,8 @@ router.get('/', (req, res) => {
     skinDomains: [
       '.minecraft.net',
       '.mojang.com',
-      new URL(baseUrl).hostname
+      new URL(baseUrl).hostname,
+      ...extraSkinDomains
     ],
     signaturePublickey: signaturePublicKey
   });
