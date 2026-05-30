@@ -116,12 +116,14 @@ function copyToClipboard(text) {
       </div>
     </div>
 
-    <EditProfileModal
-      v-if="showEditModal"
-      :profile="profile"
-      @close="showEditModal = false"
-      @updated="handleEditComplete"
-    />
+    <Teleport to="body">
+      <EditProfileModal
+        v-if="showEditModal"
+        :profile="profile"
+        @close="showEditModal = false"
+        @updated="handleEditComplete"
+      />
+    </Teleport>
   </div>
 </template>
 
