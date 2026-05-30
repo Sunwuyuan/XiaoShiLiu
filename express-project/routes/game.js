@@ -124,18 +124,34 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
     const uuid = generateUuidV4();
     const passwordHash = await hashPassword(password);
 
+    const userId = Number(req.user.id);
+    console.log(`[Game] 创建角色 - userId: ${userId}, type: ${typeof userId}, playerName: ${player_name}`);
+
+    // 验证用户是否存在
+    const [userCheck] = await pool.execute(
+      'SELECT id FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (userCheck.length === 0) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '当前用户不存在，请重新登录'
+      });
+    }
+
     const [result] = await pool.execute(
       `INSERT INTO mc_profiles (user_id, player_name, uuid, password_hash)
        VALUES (?, ?, ?, ?)`,
-      [req.user.id, player_name.trim(), uuid, passwordHash]
+      [userId, player_name.trim(), uuid, passwordHash]
     );
 
-    await auditLog('PROFILE_CREATE', req.user.id, result.insertId, req.ip, {
+    await auditLog('PROFILE_CREATE', userId, result.insertId, req.ip, {
       player_name: player_name.trim(),
       uuid
     });
 
-    console.log(`[Game] 用户 ${req.user.id} 创建角色: ${player_name}`);
+    console.log(`[Game] 用户 ${userId} 创建角色成功: ${player_name}`);
 
     res.status(HTTP_STATUS.CREATED).json({
       code: RESPONSE_CODES.SUCCESS,
