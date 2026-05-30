@@ -90,6 +90,13 @@ export const gameApi = {
     })
   },
 
+  deleteProfile(profileId) {
+    return request({
+      url: `/game/profile/${profileId}`,
+      method: 'delete'
+    })
+  },
+
   getConfig() {
     return request({
       url: '/game/config',

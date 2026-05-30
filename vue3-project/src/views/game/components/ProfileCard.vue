@@ -42,8 +42,8 @@ async function handleDelete() {
   isDeleting.value = true
   
   try {
-    const res = await gameApi.deleteSkin(props.profile.id)
-    if (res.success) {
+    const res = await gameApi.deleteProfile(props.profile.id)
+    if (res.code === 200) {
       emit('delete', props.profile.id)
       messageManager.success('角色已删除')
     }

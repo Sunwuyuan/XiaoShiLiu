@@ -28,7 +28,8 @@ const {
   auditLog,
   recordExists,
   isUnique,
-  markTokensAsTemporarilyInvalidated
+  markTokensAsTemporarilyInvalidated,
+  invalidateAllTokens
 } = require('../utils/yggdrasilHelper');
 const { pool } = require('../config/config');
 
@@ -105,7 +106,7 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
     }
 
     const [countResult] = await pool.execute(
-      `SELECT COUNT(*) as count FROM mc_profiles WHERE user_id = ?`,
+      `SELECT COUNT(*) as count FROM mc_profiles WHERE user_id = ? AND is_deleted = 0`,
       [req.user.id]
     );
 
@@ -240,6 +241,57 @@ router.put('/profile/:id/name', authenticateToken, async (req, res) => {
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
       code: RESPONSE_CODES.ERROR,
       message: '修改失败'
+    });
+  }
+});
+
+// ========== 删除角色（软删除） ==========
+router.delete('/profile/:id', authenticateToken, async (req, res) => {
+  try {
+    const profileId = parseInt(req.params.id);
+
+    const profile = await getProfileById(profileId);
+
+    if (!profile || profile.user_id !== req.user.id) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权操作此角色'
+      });
+    }
+
+    if (profile.is_deleted) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '角色已被删除'
+      });
+    }
+
+    // 软删除：标记为已删除，吊销所有令牌
+    await pool.execute(
+      `UPDATE mc_profiles SET is_deleted = 1, skin_url = NULL, cape_url = NULL WHERE id = ?`,
+      [profileId]
+    );
+
+    // 吊销该角色的所有令牌
+    await invalidateAllTokens(profileId);
+
+    await auditLog('PROFILE_DELETE', req.user.id, profileId, req.ip, {
+      player_name: profile.player_name,
+      uuid: profile.uuid
+    });
+
+    console.log(`[Game] 角色 ${profile.player_name} 已软删除`);
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: '角色已删除'
+    });
+
+  } catch (error) {
+    console.error('[Game] 删除角色错误:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '删除失败'
     });
   }
 });

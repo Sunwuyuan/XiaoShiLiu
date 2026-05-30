@@ -252,7 +252,7 @@ async function getProfileByUuid(uuid) {
 
 async function getProfileByName(playerName) {
   const [rows] = await pool.execute(
-    `SELECT * FROM mc_profiles WHERE player_name = ? AND is_banned = 0`,
+    `SELECT * FROM mc_profiles WHERE player_name = ? AND is_banned = 0 AND is_deleted = 0`,
     [playerName]
   );
 
@@ -263,7 +263,7 @@ async function getProfilesByUserId(userId) {
   const [rows] = await pool.execute(
     `SELECT id, player_name, uuid, skin_url, cape_url, skin_model, is_banned, created_at, updated_at
      FROM mc_profiles 
-     WHERE user_id = ?
+     WHERE user_id = ? AND is_deleted = 0
      ORDER BY created_at DESC`,
     [userId]
   );
@@ -475,5 +475,7 @@ module.exports = {
   buildAuthResponse,
   buildErrorResponse,
   recordExists,
-  isUnique
+  isUnique,
+  signData,
+  getSignaturePublicKey
 };
