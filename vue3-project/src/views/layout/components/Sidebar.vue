@@ -22,8 +22,8 @@ const unreadCount = computed(() => notificationStore.unreadCount)
 const menuItems = ref([
   { label: '发现', icon: 'home', path: '/explore' },
   { label: '发布', icon: 'publish', path: '/publish' },
-  { label: '游戏', icon: 'game', path: '/game' },
   { label: '通知', icon: 'notification', path: '/notification' },
+  { label: '游戏', icon: 'game', path: '/game' },
   { label: '我', icon: 'avatar', path: '/user' },
   { label: '更多', icon: 'menu', path: '' },
 ]);
@@ -89,7 +89,7 @@ onMounted(() => {
         </div>
       </li>
 
-      <li v-for="item in menuItems.slice(1, 3)" :key="item.label"
+      <li v-for="item in menuItems.slice(1, 4)" :key="item.label"
         :class="{ 'notification-item': item.icon === 'notification' }">
         <RouterLink :to="item.path" class="sidebar-link"
           :class="{ 'active-link': route.path === item.path }">
@@ -106,13 +106,13 @@ onMounted(() => {
 
 
       <li v-if="userStore.isLoggedIn">
-        <RouterLink :to="menuItems[3].path" class="sidebar-link"
-          :class="{ 'active-link': route.path === menuItems[3].path }">
+        <RouterLink :to="menuItems[4].path" class="sidebar-link"
+          :class="{ 'active-link': route.path === menuItems[4].path }">
           <span class="sidebar-icon">
             <img :src="userStore.userInfo?.avatar || defaultAvatar" :alt="userStore.userInfo?.nickname || '用户头像'"
               class="avatar-icon" @error="handleAvatarError" />
           </span>
-          <span class="sidebar-label">{{ menuItems[3].label }}</span>
+          <span class="sidebar-label">{{ menuItems[4].label }}</span>
         </RouterLink>
       </li>
 
@@ -130,9 +130,9 @@ onMounted(() => {
           <li class="sidebar-footer-item">
             <div class="sidebar-link">
               <span class="sidebar-icon">
-                <SvgIcon :name="menuItems[4].icon" width="24px" height="24px" />
+                <SvgIcon :name="menuItems[5].icon" width="24px" height="24px" />
               </span>
-              <span class="sidebar-label">{{ menuItems[4].label }}</span>
+              <span class="sidebar-label">{{ menuItems[5].label }}</span>
             </div>
           </li>
         </template>
