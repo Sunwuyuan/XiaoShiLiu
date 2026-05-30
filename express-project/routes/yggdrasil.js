@@ -16,6 +16,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
 const config = require('../config/config');
 const { uploadFile } = require('../utils/uploadHelper');
 const {
@@ -43,6 +44,16 @@ const {
 
 // 内存存储用于serverId验证（生产环境建议使用Redis）
 const serverIdCache = new Map();
+
+// 代理 URL 函数：将皮肤/披风 URL 转换为代理 URL
+function getProxyUrl(originalUrl) {
+  if (!originalUrl) return originalUrl;
+  // 如果已经是指定格式的代理URL，直接返回
+  if (originalUrl.includes('/api/yggdrasil/textures/')) return originalUrl;
+  // 将原始URL转换为代理URL格式
+  const encodedUrl = encodeURIComponent(originalUrl);
+  return `/api/yggdrasil/textures/${encodedUrl}`;
+}
 
 // 配置 multer 内存存储
 const upload = multer({
@@ -441,7 +452,7 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
 
     if (profile.skin_url) {
       texturePayload.textures.SKIN = {
-        url: profile.skin_url,
+        url: getProxyUrl(profile.skin_url),
         metadata: {
           model: profile.skin_model || 'classic'
         }
@@ -450,7 +461,7 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
 
     if (profile.cape_url) {
       texturePayload.textures.CAPE = {
-        url: profile.cape_url
+        url: getProxyUrl(profile.cape_url)
       };
     }
 
@@ -492,12 +503,17 @@ router.get('/sessionserver/session/minecraft/profile/:uuid', async (req, res) =>
     // unsigned 默认为 true，即不包含签名
     const unsignedParam = req.query.unsigned !== 'false';
 
+    console.log(`[Yggdrasil] 查询角色属性: uuid=${uuid}, unsigned=${unsignedParam}`);
+
     const profile = await getProfileByUuid(uuid);
 
     if (!profile || profile.is_banned) {
+      console.log(`[Yggdrasil] 角色不存在或已封禁: ${uuid}`);
       res.status(204).end();
       return;
     }
+
+    console.log(`[Yggdrasil] 角色查询成功: ${profile.player_name}, skin_url=${profile.skin_url}, cape_url=${profile.cape_url}`);
 
     const texturePayload = {
       timestamp: Date.now(),
@@ -508,7 +524,7 @@ router.get('/sessionserver/session/minecraft/profile/:uuid', async (req, res) =>
 
     if (profile.skin_url) {
       texturePayload.textures.SKIN = {
-        url: profile.skin_url,
+        url: getProxyUrl(profile.skin_url),
         metadata: {
           model: profile.skin_model || 'classic'
         }
@@ -517,7 +533,7 @@ router.get('/sessionserver/session/minecraft/profile/:uuid', async (req, res) =>
 
     if (profile.cape_url) {
       texturePayload.textures.CAPE = {
-        url: profile.cape_url
+        url: getProxyUrl(profile.cape_url)
       };
     }
 
@@ -740,10 +756,10 @@ router.put('/api/user/profile/:uuid/:textureType', verifyTextureAuth, upload.sin
       ));
     }
 
-    // 使用完整 hash 作为文件名（规范要求）
+    // 使用完整 hash 作为文件名（规范要求：文件名必须是材质 hash，不带扩展名）
     const uploadResult = await uploadFile(
       processedBuffer,
-      `${fileHash}.png`,
+      fileHash,
       'image/png'
     );
 
@@ -885,6 +901,43 @@ router.use((error, req, res, next) => {
   }
 
   next(error);
+});
+
+// ========== 材质代理接口 ==========
+// 将皮肤/披风 URL 代理到当前服务器域名，解决跨域和白名单问题
+router.get('/textures/:encodedUrl', async (req, res) => {
+  try {
+    const encodedUrl = req.params.encodedUrl;
+    if (!encodedUrl) {
+      return res.status(400).send('Missing URL');
+    }
+
+    // 解码原始 URL
+    const originalUrl = decodeURIComponent(encodedUrl);
+    console.log(`[Yggdrasil] 材质代理: ${originalUrl.substring(0, 80)}...`);
+
+    // 获取图片
+    const response = await axios.get(originalUrl, {
+      responseType: 'arraybuffer',
+      timeout: 10000,
+      maxContentLength: 2 * 1024 * 1024 // 限制 2MB
+    });
+
+    // 设置 CORS 头
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // 缓存一天
+
+    // 判断 Content-Type
+    const contentType = response.headers['content-type'] || 'image/png';
+    res.setHeader('Content-Type', contentType);
+
+    // 返回图片内容
+    res.send(response.data);
+
+  } catch (error) {
+    console.error('[Yggdrasil] 材质代理失败:', error.message);
+    res.status(500).send('Failed to fetch texture');
+  }
 });
 
 router.get('/sessionserver/session/minecraft/profile/:uuid/digital', (req, res) => {

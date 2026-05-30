@@ -52,7 +52,7 @@ function loadPublicKey() {
 }
 
 /**
- * 对数据进行 RSA-SHA256 签名
+ * 对数据进行 RSA-SHA1 签名（规范要求 SHA1withRSA）
  * @param {string} data - 要签名的数据（base64 编码的纹理数据）
  * @returns {string|null} - 签名结果（base64 编码），如果私钥不存在则返回 null
  */
@@ -64,7 +64,7 @@ function signData(data) {
   }
   
   try {
-    const sign = crypto.createSign('RSA-SHA256');
+    const sign = crypto.createSign('RSA-SHA1');
     sign.update(data);
     sign.end();
     return sign.sign(privateKey, 'base64');
@@ -243,7 +243,7 @@ async function getProfileByUuid(uuid) {
   const normalizedUuid = uuid.replace(/-/g, '');
   
   const [rows] = await pool.execute(
-    `SELECT * FROM mc_profiles WHERE REPLACE(uuid, '-', '') = ? AND is_banned = 0`,
+    `SELECT * FROM mc_profiles WHERE REPLACE(uuid, '-', '') = ? AND is_banned = 0 AND is_deleted = 0`,
     [normalizedUuid]
   );
 

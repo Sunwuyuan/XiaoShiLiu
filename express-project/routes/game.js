@@ -407,9 +407,9 @@ router.post('/profile/:id/skin', authenticateToken, upload.single('skin'), async
       });
     }
 
-    // 使用完整 hash 作为文件名（规范要求）
+    // 使用完整 hash 作为文件名（规范要求：文件名必须是材质 hash，不带扩展名）
     const textureHash = createFileHash(processedBuffer);
-    const fileName = `${textureHash}.png`;
+    const fileName = textureHash;
     const result = await uploadImage(processedBuffer, fileName, 'image/png');
 
     if (!result.success) {
@@ -541,9 +541,9 @@ router.post('/profile/:id/cape', authenticateToken, upload.single('cape'), async
       });
     }
 
-    // 使用完整 hash 作为文件名（规范要求）
+    // 使用完整 hash 作为文件名（规范要求：文件名必须是材质 hash，不带扩展名）
     const textureHash = createFileHash(processedBuffer);
-    const fileName = `${textureHash}.png`;
+    const fileName = textureHash;
     const result = await uploadImage(processedBuffer, fileName, 'image/png');
 
     if (!result.success) {
