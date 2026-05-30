@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { gameApi } from '@/api/game'
 import EditProfileModal from './EditProfileModal.vue'
-import { messageManager } from '@/utils/messageManager'
+import messageManager from '@/utils/messageManager'
 
 const props = defineProps({
   profile: {

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { gameApi } from '@/api/game'
-import { messageManager } from '@/utils/messageManager'
+import messageManager from '@/utils/messageManager'
 
 const props = defineProps({
   maxCount: {

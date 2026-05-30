@@ -5,7 +5,7 @@ import ProfileCard from './components/ProfileCard.vue'
 import CreateProfileModal from './components/CreateProfileModal.vue'
 import ApiConfigCard from './components/ApiConfigCard.vue'
 import LoadingSpinner from '@/components/spinner/LoadingSpinner.vue'
-import { messageManager } from '@/utils/messageManager'
+import messageManager from '@/utils/messageManager'
 
 const profiles = ref([])
 const config = ref(null)
