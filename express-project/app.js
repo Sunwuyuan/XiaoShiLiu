@@ -164,6 +164,22 @@ const PORT = config.server.port;
 app.listen(PORT, async () => {
   console.log(`● 服务器运行在端口 ${PORT}`);
   console.log(`● 环境: ${config.server.env}`);
+  console.log('========================================');
+  console.log('[Yggdrasil] 🎮 Minecraft 认证服务已启动');
+  console.log('========================================');
+  console.log('[Yggdrasil] 📋 Auth Server 端点 (认证):');
+  console.log(`[Yggdrasil]    POST /api/yggdrasil/authserver/authenticate`);
+  console.log(`[Yggdrasil]    POST /api/yggdrasil/authserver/refresh`);
+  console.log(`[Yggdrasil]    POST /api/yggdrasil/authserver/validate`);
+  console.log(`[Yggdrasil]    POST /api/yggdrasil/authserver/signout`);
+  console.log(`[Yggdrasil]    POST /api/yggdrasil/authserver/invalidate`);
+  console.log('----------------------------------------');
+  console.log('[Yggdrasil] 📋 Session Server 端点 (会话):');
+  console.log(`[Yggdrasil]    GET  /api/yggdrasil/sessionserver/session/minecraft/profile/:uuid`);
+  console.log('========================================');
+  console.log('[Yggdrasil] 🔗 authlib-injector 配置:');
+  console.log(`[Yggdrasil]    Base URL: http://localhost:${PORT}/api/yggdrasil`);
+  console.log('========================================');
   
   // 自动检查并迁移数据库
   await checkAndMigrateAdminTable();
