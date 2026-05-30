@@ -4,6 +4,7 @@ import { gameApi } from '@/api/game'
 import EditProfileModal from './EditProfileModal.vue'
 import messageManager from '@/utils/messageManager'
 import SvgIcon from '@/components/SvgIcon.vue'
+import SkinViewer3D from '@/components/SkinViewer3D.vue'
 
 const props = defineProps({
   profile: {
@@ -18,7 +19,6 @@ const showEditModal = ref(false)
 const isDeleting = ref(false)
 
 const skinUrl = computed(() => props.profile.skin_url || `https://mc-heads.net/skin/${props.profile.uuid}`)
-const avatarUrl = computed(() => `https://mc-heads.net/avatar/${props.profile.uuid}/64`)
 const isBanned = computed(() => props.profile.is_banned === 1)
 
 async function handleDelete() {
@@ -59,7 +59,7 @@ function copyToClipboard(text) {
 <template>
   <div class="profile-card" :class="{ 'banned': isBanned }">
     <div class="card-header">
-      <img :src="avatarUrl" :alt="profile.player_name" class="player-avatar" />
+      <div class="player-avatar" :style="{ backgroundImage: `url(${skinUrl})` }"></div>
       
       <div class="player-info">
         <h3 class="player-name">{{ profile.player_name }}</h3>
@@ -94,11 +94,15 @@ function copyToClipboard(text) {
 
     <div class="card-body">
       <div class="skin-preview">
-        <img 
-          :src="skinUrl" 
-          alt="皮肤预览" 
-          class="skin-image"
-          @error="(e) => { e.target.src = 'https://mc-heads.net/skin/' + profile.uuid }"
+        <SkinViewer3D
+          :skin-url="skinUrl"
+          :cape-url="profile.cape_url || ''"
+          :player-name="profile.player_name"
+          :skin-model="profile.skin_model || 'auto-detect'"
+          :width="260"
+          :height="340"
+          :show-controls="true"
+          :show-name-tag="true"
         />
       </div>
 
@@ -164,7 +168,11 @@ function copyToClipboard(text) {
   height: 64px;
   border-radius: 8px;
   image-rendering: pixelated;
-  background: var(--bg-color-tertiary);
+  background-color: var(--bg-color-tertiary);
+  /* 从 64x64 皮肤贴图中裁切 8x8 头部正面区域 (x=8, y=8) */
+  background-size: 512px 512px;
+  background-position: -64px -64px;
+  background-repeat: no-repeat;
   flex-shrink: 0;
 }
 
@@ -267,17 +275,10 @@ function copyToClipboard(text) {
 .skin-preview {
   text-align: center;
   margin-bottom: 16px;
-  padding: 20px;
+  padding: 16px;
   background: var(--bg-color-secondary);
   border-radius: 8px;
   border: 1px solid var(--border-color-secondary);
-}
-
-.skin-image {
-  max-width: 100%;
-  max-height: 200px;
-  image-rendering: pixelated;
-  object-fit: contain;
 }
 
 .profile-details {

@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { gameApi } from '@/api/game'
 import messageManager from '@/utils/messageManager'
+import SkinViewer3D from '@/components/SkinViewer3D.vue'
 
 const props = defineProps({
   profile: {
@@ -337,11 +338,15 @@ async function handleDeleteCape() {
             
             <div v-if="profile.skin_url" class="current-skin">
               <p class="section-label">当前皮肤：</p>
-              <img 
-                :src="profile.skin_url" 
-                alt="当前皮肤" 
-                class="preview-image"
-                @error="(e) => { e.target.src = 'https://mc-heads.net/skin/' + profile.uuid }"
+              <SkinViewer3D
+                :skin-url="profile.skin_url"
+                :cape-url="profile.cape_url || ''"
+                :player-name="profile.player_name"
+                :skin-model="profile.skin_model || 'auto-detect'"
+                :width="240"
+                :height="320"
+                :show-controls="true"
+                :show-name-tag="true"
               />
               <button 
                 class="btn btn-danger btn-sm"
@@ -640,15 +645,6 @@ async function handleDeleteCape() {
   background: var(--bg-color-primary);
   border-radius: 8px;
   text-align: center;
-}
-
-.preview-image {
-  max-width: 100%;
-  max-height: 200px;
-  image-rendering: pixelated;
-  object-fit: contain;
-  margin-bottom: 12px;
-  border-radius: 4px;
 }
 
 .upload-section {
