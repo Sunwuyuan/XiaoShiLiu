@@ -17,18 +17,11 @@ const ACCESS_TOKEN_EXPIRES_IN = '7d';
 const REFRESH_TOKEN_EXPIRES_IN = '30d';
 
 function generateAccessToken(profile) {
-  const payload = {
-    sub: profile.uuid.replace(/-/g, ''),
-    typ: 'access_token',
-    pid: profile.id,
-    name: profile.player_name
-  };
-
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: ACCESS_TOKEN_EXPIRES_IN,
-    issuer: 'yueshe-yggdrasil',
-    audience: 'minecraft'
-  });
+  // 使用随机字符串代替 JWT，避免 token 过长
+  // 格式: ygg_ + 32位随机字符串 + 时间戳
+  const randomPart = crypto.randomBytes(32).toString('hex');
+  const timestamp = Date.now().toString(36);
+  return `ygg_${randomPart}_${timestamp}`;
 }
 
 function generateRefreshToken() {
