@@ -6,6 +6,7 @@ import CreateProfileModal from './components/CreateProfileModal.vue'
 import ApiConfigCard from './components/ApiConfigCard.vue'
 import LoadingSpinner from '@/components/spinner/LoadingSpinner.vue'
 import messageManager from '@/utils/messageManager'
+import SvgIcon from '@/components/SvgIcon.vue'
 
 const profiles = ref([])
 const config = ref(null)
@@ -41,7 +42,7 @@ async function loadConfig() {
 
 function handleProfileCreated(newProfile) {
   profiles.value.unshift(newProfile)
-  messageManager.success('角色创建成功！')
+  messageManager.success('角色创建成功')
 }
 
 function handleProfileUpdated(updatedProfile) {
@@ -63,8 +64,10 @@ onMounted(() => {
 <template>
   <div class="game-container">
     <div class="game-header">
-      <h1 class="page-title">🎮 Minecraft 外置登录</h1>
-      <p class="page-desc">管理你的MC游戏角色，上传皮肤和披风</p>
+      <div class="header-title">
+        <h1 class="page-title">Minecraft 外置登录</h1>
+        <p class="page-desc">管理你的MC游戏角色，上传皮肤和披风</p>
+      </div>
       
       <div class="header-actions">
         <button 
@@ -72,7 +75,7 @@ onMounted(() => {
           class="btn btn-primary" 
           @click="showCreateModal = true"
         >
-          <span class="icon">+</span>
+          <SvgIcon name="plus" class="btn-icon" />
           创建角色
         </button>
         
@@ -80,7 +83,7 @@ onMounted(() => {
           class="btn btn-secondary" 
           @click="showApiConfig = !showApiConfig"
         >
-          <span class="icon">⚙️</span>
+          <SvgIcon name="settings" class="btn-icon" />
           API 配置
         </button>
       </div>
@@ -95,7 +98,7 @@ onMounted(() => {
       />
 
       <div v-if="!hasProfiles" class="empty-state">
-        <div class="empty-icon">⛏️</div>
+        <SvgIcon name="game" class="empty-icon" />
         <h3>还没有游戏角色</h3>
         <p>创建一个MC角色来使用外置登录功能</p>
         <button 
@@ -120,7 +123,7 @@ onMounted(() => {
           class="add-profile-card"
           @click="showCreateModal = true"
         >
-          <div class="add-icon">+</div>
+          <SvgIcon name="plus" class="add-icon" />
           <p>添加新角色</p>
         </div>
       </div>
@@ -149,10 +152,19 @@ onMounted(() => {
   padding: 20px;
   background: var(--bg-color-secondary);
   border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.header-title {
+  flex: 1;
 }
 
 .page-title {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-color-primary);
   margin: 0 0 8px 0;
@@ -161,7 +173,7 @@ onMounted(() => {
 .page-desc {
   font-size: 14px;
   color: var(--text-color-secondary);
-  margin: 0 0 16px 0;
+  margin: 0;
 }
 
 .header-actions {
@@ -180,17 +192,21 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
+}
+
+.btn-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--primary-color);
   color: white;
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  background: var(--primary-color-hover);
 }
 
 .btn-secondary {
@@ -208,10 +224,6 @@ onMounted(() => {
   font-size: 16px;
 }
 
-.icon {
-  font-size: 16px;
-}
-
 .game-content {
   padding: 20px;
 }
@@ -222,14 +234,17 @@ onMounted(() => {
 }
 
 .empty-icon {
-  font-size: 64px;
+  width: 80px;
+  height: 80px;
+  color: var(--text-color-tertiary);
   margin-bottom: 16px;
 }
 
 .empty-state h3 {
-  font-size: 20px;
+  font-size: 18px;
   color: var(--text-color-primary);
   margin: 0 0 8px 0;
+  font-weight: 500;
 }
 
 .empty-state p {
@@ -242,7 +257,6 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
-  margin-top: 16px;
 }
 
 .add-profile-card {
@@ -254,25 +268,19 @@ onMounted(() => {
   border: 2px dashed var(--border-color);
   border-radius: 12px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   background: var(--bg-color-secondary);
 }
 
 .add-profile-card:hover {
-  border-color: #667eea;
-  background: rgba(102, 126, 234, 0.05);
-  transform: translateY(-2px);
+  border-color: var(--primary-color);
+  background: var(--hover-bg-color);
 }
 
 .add-icon {
   width: 48px;
   height: 48px;
-  line-height: 48px;
-  text-align: center;
-  font-size: 32px;
-  color: #667eea;
-  border-radius: 50%;
-  background: rgba(102, 126, 234, 0.1);
+  color: var(--primary-color);
   margin-bottom: 12px;
 }
 
@@ -289,13 +297,15 @@ onMounted(() => {
 
   .game-header {
     padding: 16px;
-  }
-
-  .header-actions {
     flex-direction: column;
   }
 
+  .header-actions {
+    width: 100%;
+  }
+
   .btn {
+    flex: 1;
     justify-content: center;
   }
 }

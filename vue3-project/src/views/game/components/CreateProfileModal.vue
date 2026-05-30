@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { gameApi } from '@/api/game'
 import messageManager from '@/utils/messageManager'
+import SvgIcon from '@/components/SvgIcon.vue'
 
 const props = defineProps({
   maxCount: {
@@ -40,7 +41,7 @@ const passwordStrength = computed(() => {
   return {
     score: Math.min(strength, 100),
     label: strength < 40 ? '弱' : strength < 70 ? '中' : '强',
-    color: strength < 40 ? '#ef4444' : strength < 70 ? '#f59e0b' : '#10b981'
+    color: strength < 40 ? 'var(--danger-color)' : strength < 70 ? 'var(--warning-color)' : 'var(--success-color)'
   }
 })
 
@@ -86,7 +87,7 @@ async function handleSubmit() {
     if (res.success) {
       emit('created', res.data)
       emit('close')
-      messageManager.success('角色创建成功！请牢记您的独立密码')
+      messageManager.success('角色创建成功，请牢记您的独立密码')
     } else {
       messageManager.error(res.message || '创建失败')
     }
@@ -112,13 +113,15 @@ function handleClose() {
   <div class="modal-overlay" @click.self="handleClose">
     <div class="modal-container">
       <div class="modal-header">
-        <h2>⚔️ 创建游戏角色</h2>
-        <button class="close-btn" @click="handleClose">✕</button>
+        <h2>创建游戏角色</h2>
+        <button class="close-btn" @click="handleClose">
+          <SvgIcon name="close" />
+        </button>
       </div>
 
       <div class="modal-body">
         <div v-if="!canCreate" class="warning-box">
-          ⚠️ 您已达到角色数量上限（{{ currentCount }}/{{ maxCount }}）
+          您已达到角色数量上限（{{ currentCount }}/{{ maxCount }}）
         </div>
 
         <form @submit.prevent="handleSubmit" class="create-form">
@@ -150,7 +153,7 @@ function handleClose() {
                 class="toggle-password"
                 @click="showPassword = !showPassword"
               >
-                {{ showPassword ? '🙈' : '👁️' }}
+                <SvgIcon :name="showPassword ? 'eye-off' : 'eye'" />
               </button>
             </div>
 
@@ -161,7 +164,7 @@ function handleClose() {
               ></div>
             </div>
             <p v-if="passwordStrength" class="strength-text" :style="{ color: passwordStrength.color }">
-              密码强度: {{ passwordStrength.label }} ({{ passwordStrength.score }}%)
+              密码强度: {{ passwordStrength.label }}
             </p>
           </div>
 
@@ -179,10 +182,12 @@ function handleClose() {
           </div>
 
           <div class="info-box">
-            💡 <strong>重要提示：</strong><br/>
-            • 独立密码与社区账户密码不同<br/>
-            • 用于MC客户端登录验证<br/>
-            • 请妥善保管，忘记后只能修改
+            <strong>重要提示：</strong>
+            <ul>
+              <li>独立密码与社区账户密码不同</li>
+              <li>用于MC客户端登录验证</li>
+              <li>请妥善保管，忘记后只能修改</li>
+            </ul>
           </div>
 
           <div class="form-actions">
@@ -225,7 +230,7 @@ function handleClose() {
 
 .modal-container {
   background: var(--bg-color-secondary);
-  border-radius: 16px;
+  border-radius: 12px;
   width: 100%;
   max-width: 480px;
   max-height: 90vh;
@@ -242,7 +247,7 @@ function handleClose() {
 }
 
 .modal-header h2 {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   margin: 0;
   color: var(--text-color-primary);
@@ -255,16 +260,16 @@ function handleClose() {
   border-radius: 50%;
   background: transparent;
   cursor: pointer;
-  font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--text-color-secondary);
   transition: all 0.2s ease;
 }
 
 .close-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  transform: rotate(90deg);
+  background: var(--hover-bg-color);
+  color: var(--text-color-primary);
 }
 
 .modal-body {
@@ -273,10 +278,10 @@ function handleClose() {
 
 .warning-box {
   padding: 12px 16px;
-  background: #fef3c7;
-  border: 1px solid #f59e0b;
+  background: var(--warning-bg-color);
+  border: 1px solid var(--warning-color);
   border-radius: 8px;
-  color: #92400e;
+  color: var(--warning-color);
   margin-bottom: 20px;
   font-size: 14px;
 }
@@ -307,13 +312,13 @@ function handleClose() {
   font-size: 14px;
   background: var(--bg-color-primary);
   color: var(--text-color-primary);
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.1);
 }
 
 .form-group input:disabled {
@@ -333,8 +338,15 @@ function handleClose() {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 18px;
   padding: 4px;
+  color: var(--text-color-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggle-password:hover {
+  color: var(--text-color-primary);
 }
 
 .strength-bar {
@@ -357,17 +369,32 @@ function handleClose() {
 
 .error-text {
   font-size: 12px;
-  color: #ef4444;
+  color: var(--danger-color);
   margin: 4px 0 0 0;
 }
 
 .info-box {
   padding: 16px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  background: var(--bg-color-tertiary);
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-color-secondary);
+}
+
+.info-box strong {
+  color: var(--text-color-primary);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.info-box ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.info-box li {
+  margin-bottom: 4px;
 }
 
 .form-actions {
@@ -384,17 +411,16 @@ function handleClose() {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--primary-color);
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  background: var(--primary-color-hover);
 }
 
 .btn-primary:disabled {

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { gameApi } from '@/api/game'
 import EditProfileModal from './EditProfileModal.vue'
 import messageManager from '@/utils/messageManager'
+import SvgIcon from '@/components/SvgIcon.vue'
 
 const props = defineProps({
   profile: {
@@ -64,28 +65,31 @@ function copyToClipboard(text) {
         <h3 class="player-name">{{ profile.player_name }}</h3>
         <p class="uuid-text" @click="copyToClipboard(profile.uuid)">
           {{ profile.uuid }}
-          <span class="copy-icon">📋</span>
+          <SvgIcon name="copy" class="copy-icon" />
         </p>
         <span v-if="isBanned" class="ban-badge">已封禁</span>
       </div>
 
-      <button 
-        v-if="!isBanned"
-        class="edit-btn" 
-        @click="showEditModal = true"
-        title="编辑角色"
-      >
-        ✏️
-      </button>
+      <div class="card-actions">
+        <button 
+          v-if="!isBanned"
+          class="action-btn edit-btn" 
+          @click="showEditModal = true"
+          title="编辑角色"
+        >
+          <SvgIcon name="edit" />
+        </button>
 
-      <button 
-        class="delete-btn" 
-        @click="handleDelete"
-        :disabled="isDeleting"
-        title="删除角色"
-      >
-        {{ isDeleting ? '⏳' : '🗑️' }}
-      </button>
+        <button 
+          class="action-btn delete-btn" 
+          @click="handleDelete"
+          :disabled="isDeleting"
+          title="删除角色"
+        >
+          <SvgIcon v-if="isDeleting" name="loading" class="spin" />
+          <SvgIcon v-else name="delete" />
+        </button>
+      </div>
     </div>
 
     <div class="card-body">
@@ -100,18 +104,18 @@ function copyToClipboard(text) {
 
       <div class="profile-details">
         <div class="detail-item">
-          <span class="label">模型类型:</span>
+          <span class="label">模型类型</span>
           <span class="value">{{ profile.skin_model === 'slim' ? '细手臂' : '经典' }}</span>
         </div>
         
         <div class="detail-item">
-          <span class="label">创建时间:</span>
+          <span class="label">创建时间</span>
           <span class="value">{{ new Date(profile.created_at).toLocaleDateString() }}</span>
         </div>
 
         <div v-if="profile.cape_url" class="detail-item">
-          <span class="label">披风状态:</span>
-          <span class="value cape-status">✅ 已设置</span>
+          <span class="label">披风状态</span>
+          <span class="value cape-status">已设置</span>
         </div>
       </div>
     </div>
@@ -133,17 +137,16 @@ function copyToClipboard(text) {
   border-radius: 12px;
   border: 1px solid var(--border-color);
   overflow: hidden;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 }
 
 .profile-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .profile-card.banned {
   opacity: 0.6;
-  border-color: #ef4444;
+  border-color: var(--danger-color);
 }
 
 .card-header {
@@ -151,9 +154,8 @@ function copyToClipboard(text) {
   align-items: center;
   gap: 12px;
   padding: 16px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  background: var(--bg-color-tertiary);
   border-bottom: 1px solid var(--border-color);
-  position: relative;
 }
 
 .player-avatar {
@@ -161,7 +163,7 @@ function copyToClipboard(text) {
   height: 64px;
   border-radius: 8px;
   image-rendering: pixelated;
-  background: #f0f0f0;
+  background: var(--bg-color-primary);
 }
 
 .player-info {
@@ -170,7 +172,7 @@ function copyToClipboard(text) {
 }
 
 .player-name {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-color-primary);
   margin: 0 0 4px 0;
@@ -188,18 +190,19 @@ function copyToClipboard(text) {
 }
 
 .uuid-text:hover {
-  color: #667eea;
+  color: var(--primary-color);
 }
 
 .copy-icon {
-  opacity: 0.7;
-  font-size: 12px;
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
 }
 
 .ban-badge {
   display: inline-block;
   padding: 2px 8px;
-  background: #ef4444;
+  background: var(--danger-color);
   color: white;
   border-radius: 4px;
   font-size: 11px;
@@ -207,34 +210,50 @@ function copyToClipboard(text) {
   margin-top: 4px;
 }
 
-.edit-btn,
-.delete-btn {
+.card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
   width: 36px;
   height: 36px;
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
-  background: transparent;
+  background: var(--bg-color-secondary);
+  color: var(--text-color-secondary);
+}
+
+.action-btn:hover {
+  background: var(--hover-bg-color);
+  color: var(--text-color-primary);
 }
 
 .edit-btn:hover {
-  background: rgba(102, 126, 234, 0.1);
-  transform: scale(1.1);
+  color: var(--primary-color);
 }
 
 .delete-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  transform: scale(1.1);
+  color: var(--danger-color);
 }
 
-.delete-btn:disabled {
+.action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .card-body {
@@ -271,16 +290,15 @@ function copyToClipboard(text) {
 
 .label {
   color: var(--text-color-secondary);
-  font-weight: 500;
 }
 
 .value {
   color: var(--text-color-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .cape-status {
-  color: #10b981;
+  color: var(--success-color);
 }
 
 @media (max-width: 480px) {
@@ -288,15 +306,10 @@ function copyToClipboard(text) {
     flex-wrap: wrap;
   }
 
-  .edit-btn,
-  .delete-btn {
-    position: absolute;
-    right: 8px;
-    top: 8px;
-  }
-
-  .edit-btn {
-    right: 48px;
+  .card-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 8px;
   }
 }
 </style>
