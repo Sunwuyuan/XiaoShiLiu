@@ -36,7 +36,8 @@ async function checkAndMigrateAdminTable() {
         'UPDATE admin SET is_super = 1, nickname = COALESCE(nickname, username) WHERE id = (SELECT MIN(id) FROM admin)'
       );
     }
-
+    console.log('Admin 表迁移完成');
+    
     return true;
   } catch (error) {
     console.error('Admin 表迁移失败:', error.message);
