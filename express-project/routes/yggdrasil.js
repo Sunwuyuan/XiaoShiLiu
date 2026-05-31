@@ -490,6 +490,10 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
     serverIdCache.delete(serverId);
 
     console.log(`[Yggdrasil] 验证成功: ${username}${signature ? ' (已签名)' : ''}`);
+    console.log(`[Yggdrasil] 皮肤URL: ${profile.skin_url}`);
+    console.log(`[Yggdrasil] 披风URL: ${profile.cape_url}`);
+    console.log(`[Yggdrasil] 代理皮肤URL: ${texturePayload.textures.SKIN?.url || '无'}`);
+    console.log(`[Yggdrasil] 代理披风URL: ${texturePayload.textures.CAPE?.url || '无'}`);
     res.json(response);
 
   } catch (error) {
