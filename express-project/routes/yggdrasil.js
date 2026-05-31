@@ -45,15 +45,9 @@ const {
 // 内存存储用于serverId验证（生产环境建议使用Redis）
 const serverIdCache = new Map();
 
-// 代理 URL 函数：将皮肤/披风 URL 转换为代理 URL
+// 代理 URL 函数：直接返回原始 URL（不再走代理）
 function getProxyUrl(originalUrl, req) {
-  if (!originalUrl) return originalUrl;
-  // 如果已经是指定格式的代理URL，直接返回
-  if (originalUrl.includes('/api/yggdrasil/textures')) return originalUrl;
-  // 将原始URL转换为代理URL格式（完整URL，使用查询参数）
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  const encodedUrl = encodeURIComponent(originalUrl);
-  return `${baseUrl}/api/yggdrasil/textures?url=${encodedUrl}`;
+  return originalUrl;
 }
 
 // 配置 multer 内存存储
