@@ -119,7 +119,7 @@ router.get('/', (req, res) => {
 
 router.post('/authserver/authenticate', async (req, res) => {
   try {
-    const { username, password, clientToken, requestUser, agent } = req.body;
+    let { username, password, clientToken, requestUser, agent } = req.body;
 
     if (!username || !password) {
       return res.status(403).json(buildErrorResponse(
@@ -127,6 +127,9 @@ router.post('/authserver/authenticate', async (req, res) => {
         'Invalid credentials. Invalid username or password.'
       ));
     }
+
+    // 自动去除 @dy.ci 后缀，兼容只认邮箱的启动器
+    username = username.replace(/@dy\.ci$/i, '');
 
     const profile = await getProfileByName(username);
 

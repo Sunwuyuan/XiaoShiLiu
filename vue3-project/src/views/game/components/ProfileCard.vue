@@ -75,7 +75,7 @@ function copyToClipboard(text) {
       <div class="player-avatar" :style="{ backgroundImage: `url(${avatarSkinUrl})` }"></div>
       
       <div class="player-info">
-        <h3 class="player-name">{{ profile.player_name }}</h3>
+        <h3 class="player-name">{{ profile.player_name }}@dy.ci</h3>
         <p class="uuid-text" @click="copyToClipboard(profile.uuid)">
           {{ profile.uuid }}
           <SvgIcon name="copy" class="copy-icon" />
