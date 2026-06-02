@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
 const { getDB } = require('../utils/db');
-const { email: emailConfig } = require('../config/config');
+const { email: emailConfig, server: serverConfig } = require('../config/config');
 const { generateAccessToken, generateRefreshToken, verifyToken } = require('../utils/jwt');
 const { authenticateToken } = require('../middleware/auth');
 const { checkPermission } = require('../middleware/permission');
@@ -703,9 +703,9 @@ router.post('/login', async (req, res) => {
     console.log(`用户登录成功 - 用户ID: ${user.id}, 悦社号: ${user.user_id}`);
 
     // 设置最严格的HttpOnly Cookie
-    const isProduction = config.server.env === 'production';
-    
-    // 用户Token Cookie
+    const isProduction = serverConfig.env === 'production';
+
+    // 设置最严格的HttpOnly Cookie
     res.cookie('token', accessToken, {
       httpOnly: true,           // JavaScript无法访问
       secure: isProduction,     // 生产环境必须HTTPS
@@ -815,7 +815,7 @@ router.post('/logout', authenticateToken, async (req, res) => {
     console.log(`用户退出成功 - 用户ID: ${userId}`);
 
     // 清除所有认证相关的Cookie（使用与设置时相同的选项）
-    const isProduction = config.server.env === 'production';
+    const isProduction = serverConfig.env === 'production';
     const clearOptions = {
       path: '/',
       httpOnly: true,
