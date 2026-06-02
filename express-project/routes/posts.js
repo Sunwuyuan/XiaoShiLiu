@@ -1,16 +1,85 @@
 const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 const { optionalAuth, authenticateToken } = require('../middleware/auth');
 const NotificationHelper = require('../utils/notificationHelper');
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser');
 const { batchCleanupFiles } = require('../utils/fileCleanup');
 const { sanitizeContent } = require('../utils/contentSecurity');
 
+// 辅助函数：获取笔记的附加信息
+async function enrichPostsWithDetails(db, rows, currentUserId) {
+  if (!rows || rows.length === 0) return;
+
+  const postIds = rows.map(p => p.id);
+
+  // 批量获取视频信息
+  const videos = await db('post_videos').whereIn('post_id', postIds).select('*');
+  const videoMap = {};
+  videos.forEach(v => { videoMap[v.post_id] = v; });
+
+  // 批量获取图片信息
+  const images = await db('post_images').whereIn('post_id', postIds).select('*');
+  const imageMap = {};
+  images.forEach(img => {
+    if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
+    imageMap[img.post_id].push(img.image_url);
+  });
+
+  // 批量获取标签信息
+  const tags = await db({ t: 'tags' })
+    .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+    .whereIn('pt.post_id', postIds)
+    .select('pt.post_id', 't.id', 't.name');
+  const tagMap = {};
+  tags.forEach(t => {
+    if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
+    tagMap[t.post_id].push({ id: t.id, name: t.name });
+  });
+
+  // 批量获取点赞状态
+  let likedPostIds = new Set();
+  if (currentUserId) {
+    const likes = await db('likes')
+      .where({ user_id: String(currentUserId), target_type: '1' })
+      .whereIn('target_id', postIds.map(String))
+      .select('target_id');
+    likedPostIds = new Set(likes.map(l => l.target_id.toString()));
+  }
+
+  // 批量获取收藏状态
+  let collectedPostIds = new Set();
+  if (currentUserId) {
+    const collections = await db('collections')
+      .where({ user_id: String(currentUserId) })
+      .whereIn('post_id', postIds.map(String))
+      .select('post_id');
+    collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
+  }
+
+  // 组装数据
+  for (let post of rows) {
+    if (post.type === 2) {
+      const video = videoMap[post.id];
+      post.images = video && video.cover_url ? [video.cover_url] : [];
+      post.video_url = video ? video.video_url : null;
+      post.image = video && video.cover_url ? video.cover_url : null;
+    } else {
+      const postImages = imageMap[post.id] || [];
+      post.images = postImages;
+      post.image = postImages.length > 0 ? postImages[0] : null;
+    }
+    post.tags = tagMap[post.id] || [];
+    post.liked = likedPostIds.has(post.id.toString());
+    post.collected = collectedPostIds.has(post.id.toString());
+  }
+}
+
 // 获取笔记列表
 router.get('/', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
@@ -21,89 +90,48 @@ router.get('/', optionalAuth, async (req, res) => {
     const currentUserId = req.user ? req.user.id : null;
 
     if (status === 1) {
+      // 草稿箱逻辑
       if (!currentUserId) {
         return res.status(HTTP_STATUS.UNAUTHORIZED).json({ code: RESPONSE_CODES.UNAUTHORIZED, message: '查看草稿需要登录' });
       }
-      const forcedUserId = currentUserId;
 
-      let query = `
-        SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified, c.name as category
-        FROM posts p
-        LEFT JOIN users u ON p.user_id = u.id
-        LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.status = ? AND p.user_id = ?
-      `;
-      let queryParams = [status.toString(), forcedUserId.toString()];
+      let query = db({ p: 'posts' })
+        .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+        .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+        .where({ 'p.status': status, 'p.user_id': currentUserId })
+        .select(
+          'p.*',
+          'u.nickname',
+          'u.avatar as user_avatar',
+          'u.user_id as author_account',
+          'u.id as author_auto_id',
+          'u.location',
+          'u.verified',
+          'c.name as category'
+        );
 
       if (category) {
-        query += ` AND p.category_id = ?`;
-        queryParams.push(category);
+        query.where('p.category_id', category);
       }
 
       if (type) {
-        query += ` AND p.type = ?`;
-        queryParams.push(type);
+        query.where('p.type', type);
       }
 
-      query += ` ORDER BY p.created_at DESC LIMIT ? OFFSET ?`;
-      queryParams.push(limit.toString(), offset.toString());
+      const rows = await query
+        .orderBy('p.created_at', 'desc')
+        .limit(limit)
+        .offset(offset);
 
-
-      const [rows] = await pool.execute(query, queryParams);
-
-      if (rows.length > 0) {
-        const postIds = rows.map(p => p.id);
-        
-        // 批量获取视频信息
-        const [videos] = await pool.query('SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (?)', [postIds]);
-        const videoMap = {};
-        videos.forEach(v => { videoMap[v.post_id] = v; });
-
-        // 批量获取图片信息
-        const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds]);
-        const imageMap = {};
-        images.forEach(img => {
-          if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
-          imageMap[img.post_id].push(img.image_url);
-        });
-
-        // 批量获取标签信息
-        const [tags] = await pool.query(
-          'SELECT pt.post_id, t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id IN (?)',
-          [postIds]
-        );
-        const tagMap = {};
-        tags.forEach(t => {
-          if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
-          tagMap[t.post_id].push({ id: t.id, name: t.name });
-        });
-
-        // 组装数据
-        for (let post of rows) {
-          if (post.type === 2) {
-            const video = videoMap[post.id];
-            post.images = video && video.cover_url ? [video.cover_url] : [];
-            post.video_url = video ? video.video_url : null;
-            post.image = video && video.cover_url ? video.cover_url : null;
-          } else {
-            const postImages = imageMap[post.id] || [];
-            post.images = postImages;
-            post.image = postImages.length > 0 ? postImages[0] : null;
-          }
-          post.tags = tagMap[post.id] || [];
-          post.liked = false;
-          post.collected = false;
-        }
-      }
+      await enrichPostsWithDetails(db, rows, null); // 草稿不需要检查点赞收藏状态
 
       // 获取草稿总数
-      const [countResult] = await pool.execute(
-        'SELECT COUNT(*) as total FROM posts p WHERE p.status = ? AND p.user_id = ?' +
-        (category ? ' AND p.category_id = ?' : '') +
-        (type ? ' AND p.type = ?' : ''),
-        [status.toString(), forcedUserId.toString(), ...(category ? [category] : []), ...(type ? [type] : [])]
-      );
-      const total = countResult[0].total;
+      let countQuery = db('posts').where({ status, user_id: currentUserId });
+      if (category) countQuery.where('category_id', category);
+      if (type) countQuery.where('type', type);
+      
+      const countResult = await countQuery.count('* as total').first();
+      const total = parseInt(countResult.total);
       const pages = Math.ceil(total / limit);
 
       return res.json({
@@ -111,215 +139,108 @@ router.get('/', optionalAuth, async (req, res) => {
         message: 'success',
         data: {
           posts: rows,
+          pagination: { page, limit, total, pages }
+        }
+      });
+    }
+
+    // 正常发布的笔记查询
+    let query = db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+      .where('p.status', status)
+      .select(
+        'p.*',
+        'u.nickname',
+        'u.avatar as user_avatar',
+        'u.user_id as author_account',
+        'u.id as author_auto_id',
+        'u.location',
+        'u.verified',
+        'c.name as category'
+      );
+
+    // 特殊处理推荐频道
+    if (category === 'recommend') {
+      // 推荐算法：70%热度+30%新鲜度评分
+      const totalCount = await db('posts').where({ status }).count('* as total').first();
+      const totalPosts = parseInt(totalCount.total);
+      const recommendLimit = Math.ceil(totalPosts * 0.2);
+
+      const scoreExpr = db.raw('(view_count * 0.7 + LEAST(24, EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 3600) * 0.3)');
+
+      query = db({ p: 'posts' })
+        .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+        .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+        .where('p.status', status)
+        .modify(function(qb) {
+          if (type) qb.where('p.type', type);
+        })
+        .select(
+          'p.*',
+          'u.nickname',
+          'u.avatar as user_avatar',
+          'u.user_id as author_account',
+          'u.id as author_auto_id',
+          'u.location',
+          'u.verified',
+          'c.name as category',
+          { score: scoreExpr }
+        )
+        .orderByRaw('score DESC')
+        .limit(recommendLimit);
+
+      const recommendedRows = await query;
+      
+      // 应用分页
+      const paginatedRows = recommendedRows.slice(offset, offset + limit);
+      
+      await enrichPostsWithDetails(db, paginatedRows, currentUserId);
+
+      res.json({
+        code: RESPONSE_CODES.SUCCESS,
+        message: 'success',
+        data: {
+          posts: paginatedRows,
           pagination: {
             page,
             limit,
-            total,
-            pages
+            total: recommendLimit,
+            pages: Math.ceil(recommendLimit / limit)
           }
         }
       });
-    }
-
-    let query = `
-      SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified, c.name as category
-      FROM posts p
-      LEFT JOIN users u ON p.user_id = u.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE p.status = ?
-    `;
-    let queryParams = [status.toString()];
-
-    // 特殊处理推荐频道：热度新鲜度评分前20%的笔记按分数排序
-    if (category === 'recommend') {
-      // 先获取总笔记数计算20%的数量
-      let countQuery = 'SELECT COUNT(*) as total FROM posts WHERE status = ?';
-      let countParams = [status.toString()];
-
-      if (type) {
-        countQuery += ' AND type = ?';
-        countParams.push(type);
-      }
-      const [totalCountResult] = await pool.execute(countQuery, countParams);
-      const totalPosts = totalCountResult[0].total;
-      const recommendLimit = Math.ceil(totalPosts * 0.2);
-      // 推荐算法：70%热度+30%新鲜度评分，新发布24小时内的笔记获得新鲜度加分，筛选前20%按分数排序
-      let innerWhere = 'p.status = ?';
-      let innerParams = [status.toString()];
-      if (type) {
-        innerWhere += ' AND p.type = ?';
-        innerParams.push(type);
-      }
-      query = `
-        SELECT 
-          p.*, 
-          u.nickname, 
-          u.avatar as user_avatar, 
-          u.user_id as author_account, 
-          u.id as author_auto_id, 
-          u.location, 
-          u.verified,
-          c.name as category
-        FROM (
-          SELECT 
-            p.*,
-            (p.view_count * 0.7 + (24 - LEAST(TIMESTAMPDIFF(HOUR, p.created_at, NOW()), 24)) * 0.3) as score
-          FROM posts p 
-          WHERE ${innerWhere}
-          ORDER BY score DESC
-          LIMIT ?
-        ) p
-        LEFT JOIN users u ON p.user_id = u.id 
-        LEFT JOIN categories c ON p.category_id = c.id 
-        ORDER BY p.score DESC
-        LIMIT ? OFFSET ? 
-      `;
-
-      // 参数设置
-      queryParams = [
-        ...innerParams,
-        recommendLimit.toString(),
-        limit.toString(),
-        offset.toString()
-      ];
+      return;
     } else {
-      let whereConditions = [];
-      let additionalParams = [];
-
+      // 普通频道查询
       if (category) {
-        whereConditions.push('p.category_id = ?');
-        additionalParams.push(category);
+        query.where('p.category_id', category);
       }
 
       if (userId) {
-        whereConditions.push('p.user_id = ?');
-        additionalParams.push(userId);
+        query.where('p.user_id', userId);
       }
 
       if (type) {
-        whereConditions.push('p.type = ?');
-        additionalParams.push(type);
-      }
-
-      if (whereConditions.length > 0) {
-        query += ` AND ${whereConditions.join(' AND ')}`;
-      }
-
-      query += ` ORDER BY p.created_at DESC LIMIT ? OFFSET ?`;
-      queryParams = [status.toString(), ...additionalParams, limit.toString(), offset.toString()];
-    }
-    const [rows] = await pool.execute(query, queryParams);
-
-
-    // 获取每个笔记的图片、标签和用户点赞收藏状态
-    if (rows.length > 0) {
-      const postIds = rows.map(p => p.id);
-      
-      // 批量获取视频信息
-      const [videos] = await pool.query('SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (?)', [postIds]);
-      const videoMap = {};
-      videos.forEach(v => { videoMap[v.post_id] = v; });
-
-      // 批量获取图片信息
-      const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds]);
-      const imageMap = {};
-      images.forEach(img => {
-        if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
-        imageMap[img.post_id].push(img.image_url);
-      });
-
-      // 批量获取标签信息
-      const [tags] = await pool.query(
-        'SELECT pt.post_id, t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id IN (?)',
-        [postIds]
-      );
-      const tagMap = {};
-      tags.forEach(t => {
-        if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
-        tagMap[t.post_id].push({ id: t.id, name: t.name });
-      });
-
-      // 批量获取点赞状态
-      let likedPostIds = new Set();
-      if (currentUserId) {
-        const [likes] = await pool.query(
-          'SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        likedPostIds = new Set(likes.map(l => l.target_id.toString()));
-      }
-
-      // 批量获取收藏状态
-      let collectedPostIds = new Set();
-      if (currentUserId) {
-        const [collections] = await pool.query(
-          'SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
-      }
-
-      // 组装数据
-      for (let post of rows) {
-        if (post.type === 2) {
-          const video = videoMap[post.id];
-          post.images = video && video.cover_url ? [video.cover_url] : [];
-          post.video_url = video ? video.video_url : null;
-          post.image = video && video.cover_url ? video.cover_url : null;
-        } else {
-          const postImages = imageMap[post.id] || [];
-          post.images = postImages;
-          post.image = postImages.length > 0 ? postImages[0] : null;
-        }
-        post.tags = tagMap[post.id] || [];
-        post.liked = likedPostIds.has(post.id.toString());
-        post.collected = collectedPostIds.has(post.id.toString());
+        query.where('p.type', type);
       }
     }
+
+    const rows = await query
+      .orderBy('p.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
+
+    await enrichPostsWithDetails(db, rows, currentUserId);
 
     // 获取总数
-    let total;
-    if (category === 'recommend') {
-      // 推荐频道的总数限制为总笔记数的20%
-      let countQuery = 'SELECT COUNT(*) as total FROM posts WHERE status = ?';
-      let countParams = [status.toString()];
+    let countQuery = db('posts').where({ status });
+    if (category && category !== 'recommend') countQuery.where('category_id', category);
+    if (userId) countQuery.where('user_id', userId);
+    if (type) countQuery.where('type', type);
 
-      if (type) {
-        countQuery += ' AND type = ?';
-        countParams.push(type);
-      }
-
-      const [totalCountResult] = await pool.execute(countQuery, countParams);
-      const totalPosts = totalCountResult[0].total;
-      total = Math.ceil(totalPosts * 0.2);
-    } else {
-      let countQuery = 'SELECT COUNT(*) as total FROM posts WHERE status = ?';
-      let countParams = [status.toString()];
-      let countWhereConditions = [];
-
-      if (category) {
-        countQuery = 'SELECT COUNT(*) as total FROM posts p LEFT JOIN categories c ON p.category_id = c.id WHERE p.status = ?';
-        countWhereConditions.push('p.category_id = ?');
-        countParams.push(category);
-      }
-
-      if (userId) {
-        countWhereConditions.push('user_id = ?');
-        countParams.push(userId);
-      }
-
-      if (type) {
-        countWhereConditions.push('type = ?');
-        countParams.push(type);
-      }
-
-      if (countWhereConditions.length > 0) {
-        countQuery += ` AND ${countWhereConditions.join(' AND ')}`;
-      }
-
-      const [countResult] = await pool.execute(countQuery, countParams);
-      total = countResult[0].total;
-    }
+    const countResult = await countQuery.count('* as total').first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -343,30 +264,33 @@ router.get('/', optionalAuth, async (req, res) => {
 // 获取笔记详情
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const postId = req.params.id;
     const currentUserId = req.user ? req.user.id : null;
 
     // 获取笔记基本信息
-    const [rows] = await pool.execute(
-      `SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified, c.name as category
-       FROM posts p
-       LEFT JOIN users u ON p.user_id = u.id
-       LEFT JOIN categories c ON p.category_id = c.id
-       WHERE p.id = ?`,
-      [postId]
-    );
+    const post = await db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+      .where('p.id', postId)
+      .select(
+        'p.*',
+        'u.nickname',
+        'u.avatar as user_avatar',
+        'u.user_id as author_account',
+        'u.id as author_auto_id',
+        'u.location',
+        'u.verified',
+        'c.name as category'
+      )
+      .first();
 
-    if (rows.length === 0) {
+    if (!post) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '笔记不存在' });
     }
 
-    const post = rows[0];
-
     // 检查笔记状态权限
-    // status: 0=已发布, 1=草稿, 2=待审核, 3=未过审
-    // 只有已发布的笔记可以公开访问，其他状态的笔记只有作者本人可以查看
     if (post.status !== 0) {
-      // 未发布的笔记，检查是否是作者本人
       if (!currentUserId || currentUserId !== post.user_id) {
         return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '笔记不存在' });
       }
@@ -374,14 +298,13 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
     // 根据帖子类型获取对应的媒体文件
     if (post.type === 1) {
-      // 图文类型：获取图片
-      const [images] = await pool.execute('SELECT image_url FROM post_images WHERE post_id = ?', [postId]);
+      // 图文类型
+      const images = await db('post_images').where({ post_id: postId }).select('image_url');
       post.images = images.map(img => img.image_url);
     } else if (post.type === 2) {
-      // 视频类型：获取视频
-      const [videos] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [postId]);
+      // 视频类型
+      const videos = await db('post_videos').where({ post_id: postId }).select('video_url', 'cover_url');
       post.videos = videos;
-      // 将第一个视频的URL和封面提取到主对象中，方便前端使用
       if (videos.length > 0) {
         post.video_url = videos[0].video_url;
         post.cover_url = videos[0].cover_url;
@@ -389,39 +312,34 @@ router.get('/:id', optionalAuth, async (req, res) => {
     }
 
     // 获取笔记标签
-    const [tags] = await pool.execute(
-      'SELECT t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id = ?',
-      [postId]
-    );
+    const tags = await db({ t: 'tags' })
+      .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+      .where('pt.post_id', postId)
+      .select('t.id', 't.name');
     post.tags = tags;
 
-    // 检查当前用户是否已点赞和收藏（仅在用户已登录时检查）
+    // 检查当前用户是否已点赞和收藏
     if (currentUserId) {
-      const [likeResult] = await pool.execute(
-        'SELECT id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id = ?',
-        [currentUserId, postId]
-      );
-      post.liked = likeResult.length > 0;
+      const likeExists = await db('likes')
+        .where({ user_id: String(currentUserId), target_type: '1', target_id: String(postId) })
+        .first();
+      post.liked = !!likeExists;
 
-      const [collectResult] = await pool.execute(
-        'SELECT id FROM collections WHERE user_id = ? AND post_id = ?',
-        [currentUserId, postId]
-      );
-      post.collected = collectResult.length > 0;
+      const collectExists = await db('collections')
+        .where({ user_id: String(currentUserId), post_id: String(postId) })
+        .first();
+      post.collected = !!collectExists;
     } else {
       post.liked = false;
       post.collected = false;
     }
 
-    // 检查是否跳过浏览量增加
+    // 增加浏览量
     const skipViewCount = req.query.skipViewCount === 'true';
-
     if (!skipViewCount) {
-      // 增加浏览量
-      await pool.execute('UPDATE posts SET view_count = view_count + 1 WHERE id = ?', [postId]);
-      post.view_count = post.view_count + 1;
+      await db('posts').where({ id: postId }).increment('view_count', 1);
+      post.view_count += 1;
     }
-
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -437,48 +355,46 @@ router.get('/:id', optionalAuth, async (req, res) => {
 // 创建笔记
 router.post('/', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const { title, content, category_id, images, video, tags, status, type } = req.body;
     const userId = req.user.id;
     const postType = type || 1;
 
-    // 验证必填字段：发布时要求标题和内容，草稿时不强制要求
+    // 验证必填字段
     if (status !== 1 && (!title || !content)) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题和内容不能为空' });
     }
 
-    // 对内容进行安全过滤，防止XSS攻击
     const sanitizedContent = content ? sanitizeContent(content) : '';
 
-    // 验证发布类型
     if (postType !== 1 && postType !== 2) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '无效的发布类型' });
     }
 
     // 插入笔记
-    const [result] = await pool.execute(
-      'INSERT INTO posts (user_id, title, content, category_id, status, type) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, title || '', sanitizedContent, category_id || null, (status !== undefined ? status : 2).toString(), postType]
-    );
+    const postResult = await db('posts')
+      .insert({
+        user_id: userId,
+        title: title || '',
+        content: sanitizedContent,
+        category_id: category_id || null,
+        status: status !== undefined ? status : 2,
+        type: postType
+      })
+      .returning('id');
 
-    const postId = result.insertId;
+    const postId = Array.isArray(postResult) && postResult.length > 0 ? postResult[0].id : postResult[0];
 
     // 处理图片（图文类型）
     if (postType === 1 && images && images.length > 0) {
-      const validUrls = []
-
-      // 处理所有有效的URL
-      for (const imageUrl of images) {
-        if (imageUrl && typeof imageUrl === 'string') {
-          validUrls.push(imageUrl)
-        }
-      }
-
-      // 插入所有有效的图片URL
-      for (const imageUrl of validUrls) {
-        await pool.execute(
-          'INSERT INTO post_images (post_id, image_url) VALUES (?, ?)',
-          [postId.toString(), imageUrl]
-        );
+      const validUrls = images.filter(url => url && typeof url === 'string');
+      
+      if (validUrls.length > 0) {
+        const imageRecords = validUrls.map(url => ({
+          post_id: String(postId),
+          image_url: url
+        }));
+        await db('post_images').insert(imageRecords);
       }
     }
 
@@ -486,7 +402,6 @@ router.post('/', authenticateToken, async (req, res) => {
     if (postType === 2 && video && video.url && typeof video.url === 'string') {
       let coverUrl = video.coverUrl || null;
 
-      // 如果提供了视频缓冲区，提取封面
       if (video.buffer) {
         try {
           const thumbnailResult = await extractVideoThumbnail(video.buffer, video.filename || 'video.mp4');
@@ -498,59 +413,55 @@ router.post('/', authenticateToken, async (req, res) => {
         }
       }
 
-      // 插入视频记录
-      await pool.execute(
-        'INSERT INTO post_videos (post_id, video_url, cover_url) VALUES (?, ?, ?)',
-        [postId.toString(), video.url, coverUrl]
-      );
+      await db('post_videos').insert({
+        post_id: String(postId),
+        video_url: video.url,
+        cover_url: coverUrl
+      });
     }
 
     // 处理标签
     if (tags && tags.length > 0) {
       for (const tagName of tags) {
-        // 检查标签是否存在，不存在则创建
-        let [tagRows] = await pool.execute('SELECT id FROM tags WHERE name = ?', [tagName]);
+        // 检查标签是否存在
+        let tagRecord = await db('tags').where({ name: tagName }).select('id').first();
         let tagId;
 
-        if (tagRows.length === 0) {
-          const [tagResult] = await pool.execute('INSERT INTO tags (name) VALUES (?)', [tagName]);
-          tagId = tagResult.insertId;
+        if (!tagRecord) {
+          const tagResult = await db('tags').insert({ name: tagName }).returning('id');
+          tagId = Array.isArray(tagResult) && tagResult.length > 0 ? tagResult[0].id : tagResult[0];
         } else {
-          tagId = tagRows[0].id;
+          tagId = tagRecord.id;
         }
 
         // 关联笔记和标签
-        await pool.execute('INSERT INTO post_tags (post_id, tag_id) VALUES (?, ?)', [postId.toString(), tagId.toString()]);
+        await db('post_tags').insert({
+          post_id: String(postId),
+          tag_id: tagId
+        });
 
         // 更新标签使用次数
-        await pool.execute('UPDATE tags SET use_count = use_count + 1 WHERE id = ?', [tagId.toString()]);
+        await db('tags').where({ id: tagId }).increment('use_count', 1);
       }
     }
 
-    // 处理@用户通知（仅在已发布状态时）
+    // 处理@用户通知
     if (status === 0 && content && hasMentions(content)) {
       const mentionedUsers = extractMentionedUsers(content);
 
       for (const mentionedUser of mentionedUsers) {
         try {
-          // 根据悦社号查找用户的自增ID
-          const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [mentionedUser.userId]);
+          const userRow = await db('users').where({ user_id: mentionedUser.userId }).select('id').first();
 
-          if (userRows.length > 0) {
-            const mentionedUserId = userRows[0].id;
+          if (userRow && userRow.id !== userId) {
+            const mentionNotificationData = NotificationHelper.createNotificationData({
+              userId: userRow.id,
+              senderId: userId,
+              type: NotificationHelper.TYPES.MENTION,
+              targetId: String(postId)
+            });
 
-            // 不给自己发通知
-            if (mentionedUserId !== userId) {
-              // 创建@用户通知
-              const mentionNotificationData = NotificationHelper.createNotificationData({
-                userId: mentionedUserId,
-                senderId: userId,
-                type: NotificationHelper.TYPES.MENTION,
-                targetId: postId
-              });
-
-              await NotificationHelper.insertNotification(pool, mentionNotificationData);
-            }
+            await NotificationHelper.insertNotification(mentionNotificationData);
           }
         } catch (error) {
           console.error('处理@用户通知失败 - 用户: %s:', mentionedUser.userId, error);
@@ -558,13 +469,14 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
-    // 如果笔记状态为待审核(status=2)，在audit表中添加审核记录
+    // 如果笔记状态为待审核(status=2)，添加审核记录
     if (status === 2) {
       try {
-        await pool.execute(
-          'INSERT INTO audit (type, target_id, status) VALUES (?, ?, ?)',
-          [3, postId, 0]
-        );
+        await db('audit').insert({
+          type: 3,
+          target_id: String(postId),
+          status: 0
+        });
       } catch (error) {
         console.error('创建审核记录失败:', error);
       }
@@ -584,6 +496,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // 搜索笔记
 router.get('/search', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const keyword = req.query.keyword;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -596,77 +509,42 @@ router.get('/search', optionalAuth, async (req, res) => {
 
     console.log(`🔍 搜索笔记 - 关键词: ${keyword}, 页码: ${page}, 每页: ${limit}, 当前用户ID: ${currentUserId}`);
 
-    // 搜索笔记：支持标题和内容搜索（只搜索已通过的笔记）
-    const [rows] = await pool.execute(
-      `SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified
-       FROM posts p
-       LEFT JOIN users u ON p.user_id = u.id
-       WHERE p.status = 0 AND (p.title LIKE ? OR p.content LIKE ?)
-       ORDER BY p.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [`%${keyword}%`, `%${keyword}%`, limit.toString(), offset.toString()]
-    );
+    const kwPattern = `%${keyword}%`;
 
-    // 获取每个笔记的图片、标签和用户点赞收藏状态
-    if (rows.length > 0) {
-      const postIds = rows.map(p => p.id);
+    // 搜索笔记
+    const rows = await db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .where('p.status', 0)
+      .where(function() {
+        this.where('p.title', 'like', kwPattern)
+            .orWhere('p.content', 'like', kwPattern);
+      })
+      .select(
+        'p.*',
+        'u.nickname',
+        'u.avatar as user_avatar',
+        'u.user_id as author_account',
+        'u.id as author_auto_id',
+        'u.location',
+        'u.verified'
+      )
+      .orderBy('p.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
 
-      // 批量获取图片信息
-      const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds]);
-      const imageMap = {};
-      images.forEach(img => {
-        if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
-        imageMap[img.post_id].push(img.image_url);
-      });
+    await enrichPostsWithDetails(db, rows, currentUserId);
 
-      // 批量获取标签信息
-      const [tags] = await pool.query(
-        'SELECT pt.post_id, t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id IN (?)',
-        [postIds]
-      );
-      const tagMap = {};
-      tags.forEach(t => {
-        if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
-        tagMap[t.post_id].push({ id: t.id, name: t.name });
-      });
+    // 获取总数
+    const countResult = await db('posts')
+      .where({ status: 0 })
+      .where(function() {
+        this.where('title', 'like', kwPattern)
+            .orWhere('content', 'like', kwPattern);
+      })
+      .count('* as total')
+      .first();
 
-      // 批量获取点赞状态
-      let likedPostIds = new Set();
-      if (currentUserId) {
-        const [likes] = await pool.query(
-          'SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        likedPostIds = new Set(likes.map(l => l.target_id.toString()));
-      }
-
-      // 批量获取收藏状态
-      let collectedPostIds = new Set();
-      if (currentUserId) {
-        const [collections] = await pool.query(
-          'SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
-      }
-
-      // 组装数据
-      for (let post of rows) {
-        const postImages = imageMap[post.id] || [];
-        post.images = postImages;
-        post.tags = tagMap[post.id] || [];
-        post.liked = likedPostIds.has(post.id.toString());
-        post.collected = collectedPostIds.has(post.id.toString());
-      }
-    }
-
-    // 获取总数（只统计已通过的笔记）
-    const [countResult] = await pool.execute(
-      `SELECT COUNT(*) as total FROM posts 
-       WHERE status = 0 AND (title LIKE ? OR content LIKE ?)`,
-      [`%${keyword}%`, `%${keyword}%`]
-    );
-    const total = countResult[0].total;
+    const total = parseInt(countResult.total);
 
     console.log(`  搜索笔记结果 - 找到 ${total} 个笔记，当前页 ${rows.length} 个`);
 
@@ -693,55 +571,66 @@ router.get('/search', optionalAuth, async (req, res) => {
 // 获取笔记评论列表
 router.get('/:id/comments', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const postId = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
-    const sort = req.query.sort || 'desc'; // 排序方式：desc（降序）或 asc（升序）
+    const sort = req.query.sort || 'desc';
     const currentUserId = req.user ? req.user.id : null;
 
     console.log(`获取笔记评论列表 - 笔记ID: ${postId}, 页码: ${page}, 每页: ${limit}, 排序: ${sort}, 当前用户ID: ${currentUserId}`);
 
     // 验证笔记是否存在
-    const [postRows] = await pool.execute('SELECT id FROM posts WHERE id = ?', [postId.toString()]);
-    if (postRows.length === 0) {
+    const postExists = await db('posts').where({ id: postId }).first();
+    if (!postExists) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '笔记不存在' });
     }
 
-    // 获取顶级评论（parent_id为NULL）
-    const orderBy = sort === 'asc' ? 'ASC' : 'DESC';
-    const [rows] = await pool.execute(
-      `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
-       FROM comments c
-       LEFT JOIN users u ON c.user_id = u.id
-       WHERE c.post_id = ? AND c.parent_id IS NULL
-       ORDER BY c.created_at ${orderBy}
-       LIMIT ? OFFSET ?`,
-      [postId, limit.toString(), offset.toString()]
-    );
+    // 获取顶级评论
+    const orderBy = sort === 'asc' ? 'asc' : 'desc';
+    
+    const rows = await db({ c: 'comments' })
+      .leftJoin({ u: 'users' }, 'c.user_id', 'u.id')
+      .where({ 'c.post_id': postId })
+      .whereNull('c.parent_id')
+      .select(
+        'c.*',
+        'u.nickname',
+        'u.avatar as user_avatar',
+        'u.id as user_auto_id',
+        'u.user_id as user_display_id',
+        'u.location as user_location',
+        'u.verified'
+      )
+      .orderBy('c.created_at', orderBy)
+      .limit(limit)
+      .offset(offset);
 
-    // 为每个评论检查点赞状态
+    // 为每个评论检查点赞状态和回复数
     if (rows.length > 0) {
       const commentIds = rows.map(c => c.id);
 
       // 批量获取点赞状态
       let likedCommentIds = new Set();
       if (currentUserId) {
-        const [likes] = await pool.query(
-          'SELECT target_id FROM likes WHERE user_id = ? AND target_type = 2 AND target_id IN (?)',
-          [currentUserId.toString(), commentIds]
-        );
+        const likes = await db('likes')
+          .where({ user_id: String(currentUserId), target_type: '2' })
+          .whereIn('target_id', commentIds.map(String))
+          .select('target_id');
         likedCommentIds = new Set(likes.map(l => l.target_id.toString()));
       }
 
       // 批量获取子评论数量
-      const [replyCounts] = await pool.query(
-        'SELECT parent_id, COUNT(*) as count FROM comments WHERE parent_id IN (?) GROUP BY parent_id',
-        [commentIds]
-      );
+      const replyCounts = await db('comments')
+        .whereIn('parent_id', commentIds)
+        .select('parent_id')
+        .count('* as count')
+        .groupBy('parent_id');
+      
       const replyCountMap = {};
       replyCounts.forEach(r => {
-        replyCountMap[r.parent_id] = r.count;
+        replyCountMap[r.parent_id] = parseInt(r.count);
       });
 
       // 组装数据
@@ -751,13 +640,9 @@ router.get('/:id/comments', optionalAuth, async (req, res) => {
       }
     }
 
-    // 获取总数（直接从posts表读取comment_count字段）
-    const [countResult] = await pool.execute(
-      'SELECT comment_count as total FROM posts WHERE id = ?',
-      [postId]
-    );
-    const total = countResult[0].total;
-
+    // 获取总数（从posts表读取comment_count字段）
+    const postData = await db('posts').where({ id: postId }).select('comment_count as total').first();
+    const total = postData ? postData.total : 0;
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -778,58 +663,50 @@ router.get('/:id/comments', optionalAuth, async (req, res) => {
   }
 });
 
-
-
 // 收藏/取消收藏笔记
 router.post('/:id/collect', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const postId = req.params.id;
     const userId = req.user.id;
 
     // 验证笔记是否存在
-    const [postRows] = await pool.execute('SELECT id FROM posts WHERE id = ?', [postId]);
-    if (postRows.length === 0) {
+    const postExists = await db('posts').where({ id: postId }).first();
+    if (!postExists) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '笔记不存在' });
     }
 
     // 检查是否已经收藏
-    const [existingCollection] = await pool.execute(
-      'SELECT id FROM collections WHERE user_id = ? AND post_id = ?',
-      [userId.toString(), postId.toString()]
-    );
+    const existingCollection = await db('collections')
+      .where({ user_id: String(userId), post_id: String(postId) })
+      .first();
 
-    if (existingCollection.length > 0) {
+    if (existingCollection) {
       // 已收藏，执行取消收藏
-      await pool.execute(
-        'DELETE FROM collections WHERE user_id = ? AND post_id = ?',
-        [userId.toString(), postId.toString()]
-      );
+      await db('collections')
+        .where({ user_id: String(userId), post_id: String(postId) })
+        .del();
 
       // 更新笔记收藏数
-      await pool.execute('UPDATE posts SET collect_count = collect_count - 1 WHERE id = ?', [postId.toString()]);
+      await db('posts').where({ id: postId }).decrement('collect_count', 1);
 
       console.log(`取消收藏成功 - 用户ID: ${userId}, 笔记ID: ${postId}`);
       res.json({ code: RESPONSE_CODES.SUCCESS, message: '取消收藏成功', data: { collected: false } });
     } else {
       // 未收藏，执行收藏
-      await pool.execute(
-        'INSERT INTO collections (user_id, post_id) VALUES (?, ?)',
-        [userId.toString(), postId.toString()]
-      );
+      await db('collections').insert({
+        user_id: String(userId),
+        post_id: String(postId)
+      });
 
       // 更新笔记收藏数
-      await pool.execute('UPDATE posts SET collect_count = collect_count + 1 WHERE id = ?', [postId.toString()]);
+      await db('posts').where({ id: postId }).increment('collect_count', 1);
 
       // 获取笔记作者ID，用于创建通知
-      const [postResult] = await pool.execute('SELECT user_id FROM posts WHERE id = ?', [postId.toString()]);
-      if (postResult.length > 0) {
-        const targetUserId = postResult[0].user_id;
-
-        // 创建通知（不给自己发通知）
-        if (targetUserId && targetUserId !== userId) {
-          const notificationData = NotificationHelper.createCollectPostNotification(targetUserId, userId, postId);
-          const notificationResult = await NotificationHelper.insertNotification(pool, notificationData);
-        }
+      const postData = await db('posts').where({ id: postId }).select('user_id').first();
+      if (postData && postData.user_id && postData.user_id !== userId) {
+        const notificationData = NotificationHelper.createCollectPostNotification(postData.user_id, userId, postId);
+        await NotificationHelper.insertNotification(notificationData);
       }
 
       console.log(`收藏成功 - 用户ID: ${userId}, 笔记ID: ${postId}`);
@@ -844,93 +721,86 @@ router.post('/:id/collect', authenticateToken, async (req, res) => {
 // 更新笔记
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const postId = req.params.id;
     const { title, content, category_id, images, video, tags, status } = req.body;
     const userId = req.user.id;
 
-    // 验证必填字段：如果不是草稿（status=2），则要求标题、内容和分类不能为空
+    // 验证必填字段
     if (status !== 1 && (!title || !content || !category_id)) {
       console.log('验证失败 - 必填字段缺失:', { title, content, category_id, status });
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题、内容和分类不能为空' });
     }
+
     const sanitizedContent = content ? sanitizeContent(content) : '';
 
     // 检查笔记是否存在且属于当前用户
-    const [postRows] = await pool.execute(
-      'SELECT user_id, type FROM posts WHERE id = ?',
-      [postId.toString()]
-    );
-
-    if (postRows.length === 0) {
+    const postRecord = await db('posts').where({ id: postId }).select('user_id', 'type').first();
+    if (!postRecord) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '笔记不存在' });
     }
 
-    if (postRows[0].user_id !== userId) {
+    if (postRecord.user_id !== userId) {
       return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '无权限修改此笔记' });
     }
 
-    const postType = postRows[0].type;
+    const postType = postRecord.type;
 
-    // 在更新之前获取原始笔记信息（用于对比@用户变化）
-    const [originalPostRows] = await pool.execute('SELECT status, content FROM posts WHERE id = ?', [postId.toString()]);
-    const wasOriginallyDraft = originalPostRows.length > 0 && originalPostRows[0].status === 1;
-    const originalContent = originalPostRows.length > 0 ? originalPostRows[0].content : '';
+    // 获取原始笔记信息
+    const originalPost = await db('posts').where({ id: postId }).select('status', 'content').first();
+    const wasOriginallyDraft = originalPost && originalPost.status === 1;
+    const originalContent = originalPost ? originalPost.content : '';
 
     // 更新笔记基本信息
-    await pool.execute(
-      'UPDATE posts SET title = ?, content = ?, category_id = ?, status = ? WHERE id = ?',
-      [title || '', sanitizedContent, category_id || null, (status !== undefined ? status : 2).toString(), postId.toString()]
-    );
+    await db('posts')
+      .where({ id: postId })
+      .update({
+        title: title || '',
+        content: sanitizedContent,
+        category_id: category_id || null,
+        status: status !== undefined ? status : 2
+      });
 
     // 根据笔记类型处理媒体文件
     if (postType === 2) {
-      // 视频笔记：检查是否有视频相关更新
-      const hasVideoUpdate = video !== undefined || video_url !== undefined || cover_url !== undefined;
-
-      if (hasVideoUpdate) {
-        // 获取原有视频记录
-        const [oldVideoRows] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [postId.toString()]);
-        const oldVideoData = oldVideoRows.length > 0 ? oldVideoRows[0] : null;
+      // 视频笔记处理
+      if (video || req.body.video_url !== undefined || req.body.cover_url !== undefined) {
+        const oldVideoData = await db('post_videos').where({ post_id: postId }).select('video_url', 'cover_url').first();
 
         let newVideoUrl = null;
         let newCoverUrl = null;
         let shouldCleanupVideo = false;
 
         if (video && video.url) {
-          // 有完整的video对象，说明是新上传的视频
           newVideoUrl = video.url;
           newCoverUrl = video.coverUrl || null;
           shouldCleanupVideo = oldVideoData && oldVideoData.video_url !== newVideoUrl;
-        } else if (video_url !== undefined) {
-          // 有分离的video_url字段
-          newVideoUrl = video_url;
-          newCoverUrl = cover_url !== undefined ? cover_url : (oldVideoData ? oldVideoData.cover_url : null);
+        } else if (req.body.video_url !== undefined) {
+          newVideoUrl = req.body.video_url;
+          newCoverUrl = req.body.cover_url !== undefined ? req.body.cover_url : (oldVideoData ? oldVideoData.cover_url : null);
           shouldCleanupVideo = oldVideoData && oldVideoData.video_url !== newVideoUrl;
-        } else if (cover_url !== undefined && oldVideoData) {
-          // 仅更新封面，保持原视频URL不变
+        } else if (req.body.cover_url !== undefined && oldVideoData) {
           newVideoUrl = oldVideoData.video_url;
-          newCoverUrl = cover_url;
-          shouldCleanupVideo = false; // 仅更新封面，不清理视频文件
+          newCoverUrl = req.body.cover_url;
+          shouldCleanupVideo = false;
         }
 
-        // 更新数据库记录
         if (newVideoUrl) {
-          // 删除原有记录
-          await pool.execute('DELETE FROM post_videos WHERE post_id = ?', [postId.toString()]);
+          // 删除原有记录并插入新记录
+          await db('post_videos').where({ post_id: postId }).del();
+          
+          await db('post_videos').insert({
+            post_id: String(postId),
+            video_url: newVideoUrl,
+            cover_url: newCoverUrl
+          });
 
-          // 插入新记录
-          await pool.execute(
-            'INSERT INTO post_videos (post_id, video_url, cover_url) VALUES (?, ?, ?)',
-            [postId.toString(), newVideoUrl, newCoverUrl]
-          );
-
-          // 只有在视频URL发生变化时才清理旧视频文件
+          // 清理旧视频文件
           if (shouldCleanupVideo && oldVideoData) {
             const oldVideoUrls = [oldVideoData.video_url].filter(url => url);
             const oldCoverUrls = [oldVideoData.cover_url].filter(url => url && url !== newCoverUrl);
 
             if (oldVideoUrls.length > 0 || oldCoverUrls.length > 0) {
-              // 异步清理文件，不阻塞响应
               batchCleanupFiles(oldVideoUrls, oldCoverUrls).catch(error => {
                 console.error('清理废弃视频文件失败:', error);
               });
@@ -939,115 +809,101 @@ router.put('/:id', authenticateToken, async (req, res) => {
         }
       }
     } else {
-      // 图文笔记：删除原有图片并插入新的
-      await pool.execute('DELETE FROM post_images WHERE post_id = ?', [postId.toString()]);
+      // 图文笔记处理
+      await db('post_images').where({ post_id: postId }).del();
 
       if (images && images.length > 0) {
-        const validUrls = []
-
-        // 处理所有有效的URL
-        for (const imageUrl of images) {
-          if (imageUrl && typeof imageUrl === 'string') {
-            validUrls.push(imageUrl)
-          }
-        }
-
-        // 插入所有有效的图片URL
-        for (const imageUrl of validUrls) {
-          await pool.execute(
-            'INSERT INTO post_images (post_id, image_url) VALUES (?, ?)',
-            [postId, imageUrl]
-          );
+        const validUrls = images.filter(url => url && typeof url === 'string');
+        
+        if (validUrls.length > 0) {
+          const imageRecords = validUrls.map(url => ({
+            post_id: postId,
+            image_url: url
+          }));
+          await db('post_images').insert(imageRecords);
         }
       }
     }
 
-    // 获取原有标签列表（在删除前）
-    const [oldTagsResult] = await pool.execute(
-      'SELECT t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id = ?',
-      [postId.toString()]
-    );
+    // 获取原有标签列表
+    const oldTagsResult = await db({ t: 'tags' })
+      .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+      .where('pt.post_id', postId)
+      .select('t.id', 't.name');
+    
     const oldTags = oldTagsResult.map(tag => tag.name);
     const oldTagIds = new Map(oldTagsResult.map(tag => [tag.name, tag.id]));
 
-    // 新标签列表
     const newTags = tags || [];
 
-    // 找出需要删除的标签（在旧标签中但不在新标签中）
+    // 找出需要删除和新增的标签
     const tagsToRemove = oldTags.filter(tagName => !newTags.includes(tagName));
-
-    // 找出需要新增的标签（在新标签中但不在旧标签中）
     const tagsToAdd = newTags.filter(tagName => !oldTags.includes(tagName));
 
     // 删除原有标签关联
-    await pool.execute('DELETE FROM post_tags WHERE post_id = ?', [postId.toString()]);
+    await db('post_tags').where({ post_id: postId }).del();
 
     // 减少已删除标签的使用次数
     for (const tagName of tagsToRemove) {
       const tagId = oldTagIds.get(tagName);
       if (tagId) {
-        await pool.execute('UPDATE tags SET use_count = GREATEST(use_count - 1, 0) WHERE id = ?', [tagId]);
+        await db('tags').where({ id: tagId }).update({
+          use_count: db.raw('GREATEST(use_count - 1, 0)')
+        });
       }
     }
 
     // 处理新标签
     if (newTags.length > 0) {
       for (const tagName of newTags) {
-        // 检查标签是否存在，不存在则创建
-        let [tagRows] = await pool.execute('SELECT id FROM tags WHERE name = ?', [tagName]);
+        let tagRecord = await db('tags').where({ name: tagName }).select('id').first();
         let tagId;
 
-        if (tagRows.length === 0) {
-          const [tagResult] = await pool.execute('INSERT INTO tags (name) VALUES (?)', [tagName]);
-          tagId = tagResult.insertId;
+        if (!tagRecord) {
+          const tagResult2 = await db('tags').insert({ name: tagName }).returning('id');
+          tagId = Array.isArray(tagResult2) && tagResult2.length > 0 ? tagResult2[0].id : tagResult2[0];
         } else {
-          tagId = tagRows[0].id;
+          tagId = tagRecord.id;
         }
 
         // 关联笔记和标签
-        await pool.execute('INSERT INTO post_tags (post_id, tag_id) VALUES (?, ?)', [postId, tagId]);
+        await db('post_tags').insert({
+          post_id: postId,
+          tag_id: tagId
+        });
 
-        // 只对新增的标签增加使用次数（不在旧标签列表中的）
+        // 只对新增的标签增加使用次数
         if (tagsToAdd.includes(tagName)) {
-          await pool.execute('UPDATE tags SET use_count = use_count + 1 WHERE id = ?', [tagId]);
+          await db('tags').where({ id: tagId }).increment('use_count', 1);
         }
       }
     }
 
-    // 处理@用户通知的逻辑
-    if (status === 0 && content) { // 只有在已发布状态下才处理@通知
-      // 获取新内容中的@用户
+    // 处理@用户通知
+    if (status === 0 && content) {
       const newMentionedUsers = hasMentions(content) ? extractMentionedUsers(content) : [];
       const newMentionedUserIds = new Set(newMentionedUsers.map(user => user.userId));
 
-      // 获取原内容中的@用户（如果不是从草稿变为发布）
       let oldMentionedUserIds = new Set();
       if (!wasOriginallyDraft && originalContent && hasMentions(originalContent)) {
         const oldMentionedUsers = extractMentionedUsers(originalContent);
         oldMentionedUserIds = new Set(oldMentionedUsers.map(user => user.userId));
       }
 
-      // 找出需要删除通知的用户（在旧列表中但不在新列表中）
-      const usersToRemoveNotification = [...oldMentionedUserIds].filter(userId => !newMentionedUserIds.has(userId));
-
-      // 找出需要添加通知的用户（在新列表中但不在旧列表中）
-      const usersToAddNotification = [...newMentionedUserIds].filter(userId => !oldMentionedUserIds.has(userId));
+      const usersToRemoveNotification = [...oldMentionedUserIds].filter(uid => !newMentionedUserIds.has(uid));
+      const usersToAddNotification = [...newMentionedUserIds].filter(uid => !oldMentionedUserIds.has(uid));
 
       // 删除不再需要的@通知
       for (const mentionedUserId of usersToRemoveNotification) {
         try {
-          // 根据悦社号查找用户的自增ID
-          const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [mentionedUserId]);
-
-          if (userRows.length > 0) {
-            const mentionedUserAutoId = userRows[0].id;
-
-            // 删除该用户的@通知
-            await NotificationHelper.deleteNotifications(pool, {
+          const userRow = await db('users').where({ user_id: mentionedUserId }).select('id').first();
+          
+          if (userRow) {
+            await NotificationHelper.deleteNotifications({
               type: NotificationHelper.TYPES.MENTION,
               targetId: postId,
               senderId: userId,
-              userId: mentionedUserAutoId
+              userId: userRow.id
             });
           }
         } catch (error) {
@@ -1058,26 +914,19 @@ router.put('/:id', authenticateToken, async (req, res) => {
       // 添加新的@通知
       for (const mentionedUserId of usersToAddNotification) {
         try {
-          // 根据悦社号查找用户的自增ID
-          const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [mentionedUserId]);
+          const userRow = await db('users').where({ user_id: mentionedUserId }).select('id').first();
 
-          if (userRows.length > 0) {
-            const mentionedUserAutoId = userRows[0].id;
+          if (userRow && userRow.id !== userId) {
+            const mentionNotificationData = NotificationHelper.createNotificationData({
+              userId: userRow.id,
+              senderId: userId,
+              type: NotificationHelper.TYPES.MENTION,
+              targetId: postId
+            });
 
-            // 不给自己发通知
-            if (mentionedUserAutoId !== userId) {
-              // 创建@用户通知
-              const mentionNotificationData = NotificationHelper.createNotificationData({
-                userId: mentionedUserAutoId,
-                senderId: userId,
-                type: NotificationHelper.TYPES.MENTION,
-                targetId: postId
-              });
+            await NotificationHelper.insertNotification(mentionNotificationData);
 
-              await NotificationHelper.insertNotification(pool, mentionNotificationData);
-
-              console.log('添加@通知 - 笔记ID: %s, 用户: %s', postId, mentionedUserId);
-            }
+            console.log('添加@通知 - 笔记ID: %s, 用户: %s', postId, mentionedUserId);
           }
         } catch (error) {
           console.error('处理@用户通知失败 - 用户: %s:', mentionedUserId, error);
@@ -1101,59 +950,54 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // 删除笔记
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const postId = req.params.id;
     const userId = req.user.id;
 
     // 检查笔记是否存在且属于当前用户
-    const [postRows] = await pool.execute(
-      'SELECT user_id FROM posts WHERE id = ?',
-      [postId.toString()]
-    );
-
-    if (postRows.length === 0) {
+    const postRecord = await db('posts').where({ id: postId }).select('user_id').first();
+    
+    if (!postRecord) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '笔记不存在' });
     }
 
-    if (postRows[0].user_id !== userId) {
+    if (postRecord.user_id !== userId) {
       return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '无权限删除此笔记' });
     }
 
     // 获取笔记关联的标签，减少标签使用次数
-    const [tagResult] = await pool.execute(
-      'SELECT tag_id FROM post_tags WHERE post_id = ?',
-      [postId.toString()]
-    );
-
-    // 减少标签使用次数
-    for (const tag of tagResult) {
-      await pool.execute('UPDATE tags SET use_count = GREATEST(use_count - 1, 0) WHERE id = ?', [tag.tag_id.toString()]);
+    const tagRelations = await db('post_tags').where({ post_id: postId }).select('tag_id');
+    
+    for (const relation of tagRelations) {
+      await db('tags').where({ id: relation.tag_id }).update({
+        use_count: db.raw('GREATEST(use_count - 1, 0)')
+      });
     }
 
     // 获取笔记关联的视频文件，用于清理
-    const [videoRows] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [postId.toString()]);
+    const videoRows = await db('post_videos').where({ post_id: postId }).select('video_url', 'cover_url');
 
-    // 删除相关数据（由于外键约束，需要按顺序删除）
-    await pool.execute('DELETE FROM post_images WHERE post_id = ?', [postId.toString()]);
-    await pool.execute('DELETE FROM post_videos WHERE post_id = ?', [postId.toString()]);
-    await pool.execute('DELETE FROM post_tags WHERE post_id = ?', [postId.toString()]);
-    await pool.execute('DELETE FROM likes WHERE target_type = 1 AND target_id = ?', [postId.toString()]);
-    await pool.execute('DELETE FROM collections WHERE post_id = ?', [postId.toString()]);
-    await pool.execute('DELETE FROM comments WHERE post_id = ?', [postId.toString()]);
-    await pool.execute('DELETE FROM notifications WHERE target_id = ?', [postId.toString()]);
+    // 删除相关数据（按顺序删除以满足外键约束）
+    await db('post_images').where({ post_id: postId }).del();
+    await db('post_videos').where({ post_id: postId }).del();
+    await db('post_tags').where({ post_id: postId }).del();
+    await db('likes').where({ target_type: '1', target_id: String(postId) }).del();
+    await db('collections').where({ post_id: String(postId) }).del();
+    await db('comments').where({ post_id: postId }).del();
+    await db('notifications').where({ target_id: String(postId) }).del();
 
     // 清理关联的视频文件
     if (videoRows.length > 0) {
       const videoUrls = videoRows.map(row => row.video_url).filter(url => url);
       const coverUrls = videoRows.map(row => row.cover_url).filter(url => url);
 
-      // 异步清理文件，不阻塞响应
       batchCleanupFiles(videoUrls, coverUrls).catch(error => {
         console.error('清理笔记关联视频文件失败:', error);
       });
     }
 
     // 最后删除笔记
-    await pool.execute('DELETE FROM posts WHERE id = ?', [postId.toString()]);
+    await db('posts').where({ id: postId }).del();
 
     console.log(`删除笔记成功 - 用户ID: ${userId}, 笔记ID: ${postId}`);
 
@@ -1170,23 +1014,23 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // 取消收藏笔记
 router.delete('/:id/collect', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const postId = req.params.id;
     const userId = req.user.id;
 
     console.log(`取消收藏 - 用户ID: ${userId}, 笔记ID: ${postId}`);
 
     // 删除收藏记录
-    const [result] = await pool.execute(
-      'DELETE FROM collections WHERE user_id = ? AND post_id = ?',
-      [userId.toString(), postId.toString()]
-    );
+    const result = await db('collections')
+      .where({ user_id: String(userId), post_id: String(postId) })
+      .del();
 
-    if (result.affectedRows === 0) {
+    if (result === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '收藏记录不存在' });
     }
 
     // 更新笔记收藏数
-    await pool.execute('UPDATE posts SET collect_count = collect_count - 1 WHERE id = ?', [postId.toString()]);
+    await db('posts').where({ id: postId }).decrement('collect_count', 1);
 
     console.log(`取消收藏成功 - 用户ID: ${userId}, 笔记ID: ${postId}`);
     res.json({ code: RESPONSE_CODES.SUCCESS, message: '取消收藏成功', data: { collected: false } });

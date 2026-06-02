@@ -1,12 +1,13 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 const { optionalAuth } = require('../middleware/auth');
 
 // 搜索（通用搜索接口）
 router.get('/', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const keyword = req.query.keyword || '';
     const tag = req.query.tag || '';
     const type = req.query.type || 'all'; // all, posts, videos, users
@@ -40,61 +41,57 @@ router.get('/', optionalAuth, async (req, res) => {
 
     // all、posts、videos都返回笔记内容，但根据type过滤不同类型
     if (type === 'all' || type === 'posts' || type === 'videos') {
-      // 构建搜索条件
-      let whereConditions = [];
-      let queryParams = [];
+      // 构建基础查询
+      let query = db({ p: 'posts' })
+        .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+        .select(
+          'p.*',
+          'u.nickname',
+          'u.avatar as user_avatar',
+          'u.user_id as author_account',
+          'u.location'
+        )
+        .where('p.status', 0);
 
-      // 关键词搜索条件 - 匹配悦社号、昵称、标题、正文内容、标签名称中的任意一种
+      // 关键词搜索条件
       if (keyword.trim()) {
-        whereConditions.push('(p.title LIKE ? OR p.content LIKE ? OR u.nickname LIKE ? OR u.user_id LIKE ? OR EXISTS (SELECT 1 FROM post_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.post_id = p.id AND t.name LIKE ?))');
-        queryParams.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+        const kwPattern = `%${keyword}%`;
+        query.where(function() {
+          this.where('p.title', 'like', kwPattern)
+              .orWhere('p.content', 'like', kwPattern)
+              .orWhere('u.nickname', 'like', kwPattern)
+              .orWhere('u.user_id', 'like', kwPattern)
+              .orWhereExists(
+                db({ pt: 'post_tags' })
+                  .join({ t: 'tags' }, 'pt.tag_id', 't.id')
+                  .whereRaw('pt.post_id = p.id')
+                  .where('t.name', 'like', kwPattern)
+              );
+        });
       }
 
-      // 标签搜索条件 - 如果有keyword，则在keyword结果基础上筛选；如果没有keyword，则直接按tag搜索
+      // 标签搜索条件
       if (tag.trim()) {
-        if (keyword.trim()) {
-          // 有keyword时，在keyword搜索结果基础上进行tag筛选（AND关系）
-          whereConditions.push('EXISTS (SELECT 1 FROM post_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.post_id = p.id AND t.name = ?)');
-          queryParams.push(tag);
-        } else {
-          // 没有keyword时，直接按tag搜索
-          whereConditions.push('EXISTS (SELECT 1 FROM post_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.post_id = p.id AND t.name = ?)');
-          queryParams.push(tag);
-        }
+        query.whereExists(
+          db({ pt2: 'post_tags' })
+            .join({ t2: 'tags' }, 'pt2.tag_id', 't2.id')
+            .whereRaw('pt2.post_id = p.id')
+            .where('t2.name', tag)
+        );
       }
-
-            // 添加status条件，确保只搜索已发布的笔记
-      whereConditions.push('p.status = 0');
 
       // 根据type添加内容类型过滤
       if (type === 'posts') {
-        // 图文tab：只显示图片笔记（type=1），过滤掉视频
-        whereConditions.push('p.type = 1');
+        query.where('p.type', 1);
       } else if (type === 'videos') {
-        // 视频tab：只显示视频笔记（type=2）
-        whereConditions.push('p.type = 2');
+        query.where('p.type', 2);
       }
-      // all类型不添加type过滤，显示所有类型
-
-      // 构建WHERE子句
-      let whereClause = '';
-      if (whereConditions.length > 0) {
-        // 所有条件都用AND连接（keyword和tag是筛选关系）
-        whereClause = `WHERE ${whereConditions.join(' AND ')}`;
-      }
-
-
 
       // 搜索笔记
-      const [postRows] = await pool.execute(
-        `SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.location
-         FROM posts p
-         LEFT JOIN users u ON p.user_id = u.id
-         ${whereClause}
-         ORDER BY p.created_at DESC
-         LIMIT ? OFFSET ?`,
-        [...queryParams, limit.toString(), offset.toString()]
-      );
+      const postRows = await query
+        .orderBy('p.created_at', 'desc')
+        .limit(limit)
+        .offset(offset);
 
       // 获取每个笔记的图片、标签和用户点赞收藏状态
       if (postRows.length > 0) {
@@ -107,12 +104,12 @@ router.get('/', optionalAuth, async (req, res) => {
         }
 
         // 批量获取视频信息
-        const [videos] = await pool.query('SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (?)', [postIds]);
+        const videos = await db('post_videos').whereIn('post_id', postIds).select('*');
         const videoMap = {};
         videos.forEach(v => { videoMap[v.post_id] = v; });
 
         // 批量获取图片信息
-        const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds]);
+        const images = await db('post_images').whereIn('post_id', postIds).select('*');
         const imageMap = {};
         images.forEach(img => {
           if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
@@ -120,10 +117,10 @@ router.get('/', optionalAuth, async (req, res) => {
         });
 
         // 批量获取标签信息
-        const [tags] = await pool.query(
-          'SELECT pt.post_id, t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id IN (?)',
-          [postIds]
-        );
+        const tags = await db({ t: 'tags' })
+          .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+          .whereIn('pt.post_id', postIds)
+          .select('pt.post_id', 't.id', 't.name');
         const tagMap = {};
         tags.forEach(t => {
           if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
@@ -133,20 +130,20 @@ router.get('/', optionalAuth, async (req, res) => {
         // 批量获取点赞状态
         let likedPostIds = new Set();
         if (currentUserId) {
-          const [likes] = await pool.query(
-            'SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (?)',
-            [currentUserId.toString(), postIds]
-          );
+          const likes = await db('likes')
+            .where({ user_id: String(currentUserId), target_type: '1' })
+            .whereIn('target_id', postIds.map(String))
+            .select('target_id');
           likedPostIds = new Set(likes.map(l => l.target_id.toString()));
         }
 
         // 批量获取收藏状态
         let collectedPostIds = new Set();
         if (currentUserId) {
-          const [collections] = await pool.query(
-            'SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (?)',
-            [currentUserId.toString(), postIds]
-          );
+          const collections = await db('collections')
+            .where({ user_id: String(currentUserId) })
+            .whereIn('post_id', postIds.map(String))
+            .select('post_id');
           collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
         }
 
@@ -169,65 +166,113 @@ router.get('/', optionalAuth, async (req, res) => {
       }
 
       // 获取笔记总数 - 使用相同的搜索条件
-      const [postCountResult] = await pool.execute(
-        `SELECT COUNT(*) as total FROM posts p
-         LEFT JOIN users u ON p.user_id = u.id
-         ${whereClause}`,
-        queryParams
-      );
+      let countQuery = db({ p: 'posts' })
+        .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+        .where('p.status', 0);
 
-      // 统计标签频率 - 始终基于keyword搜索结果，不受当前tag筛选影响
+      if (keyword.trim()) {
+        const kwPattern = `%${keyword}%`;
+        countQuery.where(function() {
+          this.where('p.title', 'like', kwPattern)
+              .orWhere('p.content', 'like', kwPattern)
+              .orWhere('u.nickname', 'like', kwPattern)
+              .orWhere('u.user_id', 'like', kwPattern)
+              .orWhereExists(
+                db({ pt3: 'post_tags' })
+                  .join({ t3: 'tags' }, 'pt3.tag_id', 't3.id')
+                  .whereRaw('pt3.post_id = p.id')
+                  .where('t.name', 'like', kwPattern)
+              );
+        });
+      }
+
+      if (tag.trim()) {
+        countQuery.whereExists(
+          db({ pt4: 'post_tags' })
+            .join({ t4: 'tags' }, 'pt4.tag_id', 't4.id')
+            .whereRaw('pt4.post_id = p.id')
+            .where('t4.name', tag)
+        );
+      }
+
+      if (type === 'posts') {
+        countQuery.where('p.type', 1);
+      } else if (type === 'videos') {
+        countQuery.where('p.type', 2);
+      }
+
+      const postCountResult = await countQuery.count('* as total').first();
+
+      // 统计标签频率
       let tagStats = [];
       if (keyword.trim()) {
-        // 构建仅基于keyword的搜索条件（包括标题、内容、用户名、悦社号、标签名称），并确保只统计已激活的笔记
-        const keywordWhereClause = 'WHERE p.status = 0 AND (p.title LIKE ? OR p.content LIKE ? OR u.nickname LIKE ? OR u.user_id LIKE ? OR EXISTS (SELECT 1 FROM post_tags pt2 JOIN tags t2 ON pt2.tag_id = t2.id WHERE pt2.post_id = p.id AND t2.name LIKE ?))';
-        const keywordParams = [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`];
+        const kwPattern = `%${keyword}%`;
 
-        // 获取keyword搜索结果中的标签统计 - 按数量降序排序
-        const [tagStatsResult] = await pool.execute(
-          `SELECT t.name, COUNT(*) as count
-           FROM tags t
-           JOIN post_tags pt ON t.id = pt.tag_id
-           JOIN posts p ON pt.post_id = p.id
-           LEFT JOIN users u ON p.user_id = u.id
-           ${keywordWhereClause}
-           GROUP BY t.id, t.name
-           ORDER BY count DESC
-           LIMIT 10`,
-          keywordParams
-        );
+        // 获取keyword搜索结果中的标签统计
+        const tagStatsResult = await db({ t: 'tags' })
+          .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+          .join({ p: 'posts' }, 'pt.post_id', 'p.id')
+          .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+          .where('p.status', 0)
+          .where(function() {
+            this.where('p.title', 'like', kwPattern)
+                .orWhere('p.content', 'like', kwPattern)
+                .orWhere('u.nickname', 'like', kwPattern)
+                .orWhere('u.user_id', 'like', kwPattern)
+                .orWhereExists(
+                  db({ pt5: 'post_tags' })
+                    .join({ t5: 'tags' }, 'pt5.tag_id', 't5.id')
+                    .whereRaw('pt5.post_id = p.id')
+                    .where('t5.name', 'like', kwPattern)
+                );
+          })
+          .select('t.name')
+          .count('* as count')
+          .groupBy('t.id', 't.name')
+          .orderBy('count', 'desc')
+          .limit(10);
 
         tagStats = tagStatsResult.map(item => ({
           id: item.name,
           label: item.name,
-          count: item.count
+          count: parseInt(item.count)
         }));
 
         // 如果指定了tag，且tag不在前10中，则需要将其补充进去
         if (tag && !tagStats.some(t => t.id === tag)) {
-          const [tagCount] = await pool.execute(
-            `SELECT COUNT(*) as count
-             FROM post_tags pt
-             JOIN tags t ON pt.tag_id = t.id
-             JOIN posts p ON pt.post_id = p.id
-             LEFT JOIN users u ON p.user_id = u.id
-             ${keywordWhereClause} AND t.name = ?`,
-            [...keywordParams, tag]
-          );
-          
-          if (tagCount[0].count > 0) {
+          const tagCount = await db({ pt6: 'post_tags' })
+            .join({ t6: 'tags' }, 'pt6.tag_id', 't6.id')
+            .join({ p: 'posts' }, 'pt6.post_id', 'p.id')
+            .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+            .where('p.status', 0)
+            .where(function() {
+              this.where('p.title', 'like', kwPattern)
+                  .orWhere('p.content', 'like', kwPattern)
+                  .orWhere('u.nickname', 'like', kwPattern)
+                  .orWhere('u.user_id', 'like', kwPattern)
+                  .orWhereExists(
+                    db({ pt7: 'post_tags' })
+                      .join({ t7: 'tags' }, 'pt7.tag_id', 't7.id')
+                      .whereRaw('pt7.post_id = p.id')
+                      .where('t7.name', 'like', kwPattern)
+                  );
+            })
+            .where('t6.name', tag)
+            .count('* as count')
+            .first();
+
+          if (parseInt(tagCount.count) > 0) {
             tagStats.push({
               id: tag,
               label: tag,
-              count: tagCount[0].count
+              count: parseInt(tagCount.count)
             });
             // 重新排序并保持10个限制
             tagStats.sort((a, b) => b.count - a.count);
             if (tagStats.length > 10) {
-              // 如果选中的标签在排序后还是最后一位且超过了10个，则保留它，去掉倒数第二个
               const tagIndex = tagStats.findIndex(t => t.id === tag);
               if (tagIndex >= 10) {
-                 tagStats.splice(9, 1); // 去掉第10个
+                 tagStats.splice(9, 1);
               } else {
                  tagStats.pop();
               }
@@ -244,8 +289,8 @@ router.get('/', optionalAuth, async (req, res) => {
           pagination: {
             page,
             limit,
-            total: postCountResult[0].total,
-            pages: Math.ceil(postCountResult[0].total / limit)
+            total: parseInt(postCountResult.total),
+            pages: Math.ceil(parseInt(postCountResult.total) / limit)
           }
         };
       } else if (type === 'posts' || type === 'videos') {
@@ -255,8 +300,8 @@ router.get('/', optionalAuth, async (req, res) => {
           pagination: {
             page,
             limit,
-            total: postCountResult[0].total,
-            pages: Math.ceil(postCountResult[0].total / limit)
+            total: parseInt(postCountResult.total),
+            pages: Math.ceil(parseInt(postCountResult.total) / limit)
           }
         };
       }
@@ -264,33 +309,56 @@ router.get('/', optionalAuth, async (req, res) => {
 
     // 只有当type为'users'时才搜索用户
     if (type === 'users') {
+      const kwPattern = `%${keyword}%`;
+
       // 搜索用户
-      const [userRows] = await pool.execute(
-        `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.follow_count, u.fans_count, u.like_count, u.created_at, u.verified,
-                (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND status = 0) as post_count
-         FROM users u
-         WHERE u.nickname LIKE ? OR u.user_id LIKE ? 
-         ORDER BY u.created_at DESC 
-         LIMIT ? OFFSET ?`,
-        [`%${keyword}%`, `%${keyword}%`, limit.toString(), offset.toString()]
-      );
+      const userRows = await db({ u: 'users' })
+        .select(
+          'u.id',
+          'u.user_id',
+          'u.nickname',
+          'u.avatar',
+          'u.bio',
+          'u.location',
+          'u.follow_count',
+          'u.fans_count',
+          'u.like_count',
+          'u.created_at',
+          'u.verified'
+        )
+        .where(function() {
+          this.where('u.nickname', 'like', kwPattern)
+              .orWhere('u.user_id', 'like', kwPattern);
+        })
+        .orderBy('u.created_at', 'desc')
+        .limit(limit)
+        .offset(offset);
+
+      // 为每个用户添加笔记数统计
+      for (let user of userRows) {
+        const postCount = await db('posts')
+          .where({ user_id: user.id, status: 0 })
+          .count('* as count')
+          .first();
+        user.post_count = parseInt(postCount.count);
+      }
 
       // 检查关注状态（仅在用户已登录时）
       if (currentUserId && userRows.length > 0) {
         const userIds = userRows.map(u => u.id.toString());
 
         // 批量获取关注状态
-        const [follows] = await pool.query(
-          'SELECT following_id FROM follows WHERE follower_id = ? AND following_id IN (?)',
-          [currentUserId.toString(), userIds]
-        );
+        const follows = await db('follows')
+          .where({ follower_id: String(currentUserId) })
+          .whereIn('following_id', userIds)
+          .select('following_id');
         const followingSet = new Set(follows.map(f => f.following_id.toString()));
 
         // 批量获取互相关注状态
-        const [mutuals] = await pool.query(
-          'SELECT follower_id FROM follows WHERE following_id = ? AND follower_id IN (?)',
-          [currentUserId.toString(), userIds]
-        );
+        const mutuals = await db('follows')
+          .where({ following_id: String(currentUserId) })
+          .whereIn('follower_id', userIds)
+          .select('follower_id');
         const mutualSet = new Set(mutuals.map(f => f.follower_id.toString()));
 
         for (let user of userRows) {
@@ -322,19 +390,21 @@ router.get('/', optionalAuth, async (req, res) => {
       }
 
       // 获取用户总数
-      const [userCountResult] = await pool.execute(
-        `SELECT COUNT(*) as total FROM users 
-         WHERE nickname LIKE ? OR user_id LIKE ?`,
-        [`%${keyword}%`, `%${keyword}%`]
-      );
+      const userCountResult = await db('users')
+        .where(function() {
+          this.where('nickname', 'like', kwPattern)
+              .orWhere('user_id', 'like', kwPattern);
+        })
+        .count('* as total')
+        .first();
 
       result.users = {
         data: userRows,
         pagination: {
           page,
           limit,
-          total: userCountResult[0].total,
-          pages: Math.ceil(userCountResult[0].total / limit)
+          total: parseInt(userCountResult.total),
+          pages: Math.ceil(parseInt(userCountResult.total) / limit)
         }
       };
     }
@@ -345,7 +415,7 @@ router.get('/', optionalAuth, async (req, res) => {
       data: {
         keyword,
         tag,
-        type: type, // 确保返回正确的type值
+        type: type,
         ...result
       }
     });

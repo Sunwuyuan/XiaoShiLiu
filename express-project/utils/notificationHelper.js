@@ -4,6 +4,7 @@
  */
 
 const crypto = require('crypto');
+const { getDB } = require('./db');
 
 class NotificationHelper {
   // 通知类型定义
@@ -246,20 +247,20 @@ class NotificationHelper {
    * @param {Object} notificationData 通知数据
    * @returns {Promise<Object>} 插入结果
    */
-  static async insertNotification(pool, notificationData) {
-    const [result] = await pool.execute(
-      'INSERT INTO notifications (user_id, sender_id, type, title, target_id, comment_id, is_read) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [
-        notificationData.user_id,
-        notificationData.sender_id,
-        notificationData.type,
-        notificationData.title,
-        notificationData.target_id,
-        notificationData.comment_id,
-        notificationData.is_read
-      ]
-    );
-    return result;
+  static async insertNotification(notificationData) {
+    const db = getDB();
+    const [result] = await db('notifications')
+      .insert({
+        user_id: notificationData.user_id,
+        sender_id: notificationData.sender_id,
+        type: notificationData.type,
+        title: notificationData.title,
+        target_id: notificationData.target_id,
+        comment_id: notificationData.comment_id,
+        is_read: notificationData.is_read
+      })
+      .returning('*');
+    return result[0];
   }
 
   /**
@@ -268,14 +269,14 @@ class NotificationHelper {
    * @param {Object} params 通知参数
    * @returns {Promise<Object>} 插入结果
    */
-  static async createAndInsertNotification(pool, params) {
+  static async createAndInsertNotification(params) {
     // 检查是否给自己发通知
     if (params.userId === params.senderId) {
       return null;
     }
 
     const notificationData = this.createNotificationData(params);
-    return await this.insertNotification(pool, notificationData);
+    return await this.insertNotification(notificationData);
   }
 
   /**
@@ -288,18 +289,18 @@ class NotificationHelper {
    * @param {number} conditions.userId 接收者ID（可选）
    * @returns {Promise<Object>} 删除结果
    */
-  static async deleteNotifications(pool, conditions) {
+  static async deleteNotifications(conditions) {
+    const db = getDB();
     const { type, targetId, senderId, userId } = conditions;
     
-    let query = 'DELETE FROM notifications WHERE type = ? AND target_id = ? AND sender_id = ?';
-    let params = [type, targetId, senderId];
+    const query = db('notifications')
+      .where({ type, target_id: targetId, sender_id: senderId });
     
     if (userId) {
-      query += ' AND user_id = ?';
-      params.push(userId);
+      query.where({ user_id: userId });
     }
     
-    const [result] = await pool.execute(query, params);
+    const result = await query.del();
     return result;
   }
 
@@ -312,13 +313,14 @@ class NotificationHelper {
    * @param {number} conditions.senderId 发送者ID
    * @returns {Promise<Array>} 接收者ID列表
    */
-  static async getNotificationReceivers(pool, conditions) {
+  static async getNotificationReceivers(conditions) {
+    const db = getDB();
     const { type, targetId, senderId } = conditions;
     
-    const [rows] = await pool.execute(
-      'SELECT DISTINCT user_id FROM notifications WHERE type = ? AND target_id = ? AND sender_id = ?',
-      [type, targetId, senderId]
-    );
+    const rows = await db('notifications')
+      .where({ type, target_id: targetId, sender_id: senderId })
+      .distinct('user_id')
+      .select('user_id');
     
     return rows.map(row => row.user_id);
   }

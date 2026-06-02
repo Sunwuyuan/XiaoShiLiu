@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES } = require('../constants');
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 const config = require('../config/config');
 const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
 const { getIPLocation, getRealIP } = require('../utils/ipLocation');
@@ -17,10 +17,9 @@ const LOGTO_CONFIG = {
 // 检查数据库中是否存在 logto_id 列
 async function checkLogtoColumnExists() {
   try {
-    const [columns] = await pool.execute(
-      "SHOW COLUMNS FROM users LIKE 'logto_id'"
-    );
-    return columns.length > 0;
+    const db = getDB();
+    const columns = await db.raw("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'logto_id'");
+    return columns.rows ? columns.rows.length > 0 : (Array.isArray(columns) ? columns.length > 0 : false);
   } catch (error) {
     console.warn('检查 logto_id 列失败:', error.message);
     return false;
@@ -126,10 +125,8 @@ async function findOrCreateUser(logtoUser, req) {
   if (logtoColumnExists) {
     console.log('检测到 logto_id 列存在，使用 Logto ID 查找用户');
     
-    let [users] = await pool.execute(
-      'SELECT * FROM users WHERE logto_id = ?',
-      [logtoId]
-    );
+    const db = getDB();
+    const users = await db('users').where({ logto_id: logtoId }).select('*');
     
     console.log('数据库查询结果:', {
       found: users.length > 0,
@@ -141,10 +138,7 @@ async function findOrCreateUser(logtoUser, req) {
       user = users[0];
       console.log('找到已存在的 Logto 用户，更新登录时间');
       
-      await pool.execute(
-        'UPDATE users SET last_login_at = NOW() WHERE id = ?',
-        [user.id]
-      );
+      await db('users').where({ id: user.id }).update({ last_login_at: db.fn.now() });
       return user;
     }
     
@@ -158,29 +152,25 @@ async function findOrCreateUser(logtoUser, req) {
     }
     
     const userId = 'l' + Date.now().toString(36);
-    const [result] = await pool.execute(
-      'INSERT INTO users (logto_id, user_id, nickname, avatar, bio, email, location, last_login_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [
-        logtoId,
-        userId.slice(0, 15),
-        nickname,
-        avatar,
-        '',
-        email,
-        ipLocation
-      ]
-    );
+    const result = await db('users').insert({
+      logto_id: logtoId,
+      user_id: userId.slice(0, 15),
+      nickname: nickname,
+      avatar: avatar,
+      bio: '',
+      email: email,
+      location: ipLocation,
+      last_login_at: db.fn.now(),
+      created_at: db.fn.now()
+    });
     
     console.log('新用户创建成功:', {
-      databaseId: result.insertId,
+      databaseId: result[0],
       userId: userId.slice(0, 15),
       nickname
     });
     
-    const [newUsers] = await pool.execute(
-      'SELECT * FROM users WHERE id = ?',
-      [result.insertId]
-    );
+    const newUsers = await db('users').where({ id: result[0] }).select('*');
     
     return newUsers[0];
   } else {
@@ -196,23 +186,20 @@ async function findOrCreateUser(logtoUser, req) {
       console.log('IP 属地查询失败:', error.message);
     }
     
+    const db = getDB();
     const userId = 'l' + Date.now().toString(36);
-    const [result] = await pool.execute(
-      'INSERT INTO users (user_id, nickname, avatar, bio, email, location, last_login_at, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [
-        userId.slice(0, 15),
-        nickname,
-        avatar,
-        '',
-        email,
-        ipLocation
-      ]
-    );
+    const result = await db('users').insert({
+      user_id: userId.slice(0, 15),
+      nickname: nickname,
+      avatar: avatar,
+      bio: '',
+      email: email,
+      location: ipLocation,
+      last_login_at: db.fn.now(),
+      created_at: db.fn.now()
+    });
     
-    const [newUsers] = await pool.execute(
-      'SELECT * FROM users WHERE id = ?',
-      [result.insertId]
-    );
+    const newUsers = await db('users').where({ id: result[0] }).select('*');
     
     return newUsers[0];
   }
@@ -320,17 +307,22 @@ router.post('/callback', async (req, res) => {
     
     // 获取IP地理位置并更新用户location和最后登录时间
     const ipLocation = await getIPLocation(userIP);
-    await pool.execute(
-      'UPDATE users SET location = ?, last_login_at = NOW() WHERE id = ?',
-      [ipLocation, user.id.toString()]
-    );
+    const db = getDB();
+    await db('users').where({ id: user.id.toString() }).update({ 
+      location: ipLocation, 
+      last_login_at: db.fn.now() 
+    });
     
     // 清除旧会话并保存新会话
-    await pool.execute('UPDATE user_sessions SET is_active = 0 WHERE user_id = ?', [user.id.toString()]);
-    await pool.execute(
-      'INSERT INTO user_sessions (user_id, token, refresh_token, expires_at, user_agent, is_active) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY), ?, 1)',
-      [user.id.toString(), accessToken, refreshToken, userAgent]
-    );
+    await db('user_sessions').where({ user_id: user.id.toString() }).update({ is_active: 0 });
+    await db('user_sessions').insert({
+      user_id: user.id.toString(),
+      token: accessToken,
+      refresh_token: refreshToken,
+      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      user_agent: userAgent,
+      is_active: 1
+    });
     
     // 更新用户对象中的location字段
     user.location = ipLocation;
@@ -408,10 +400,9 @@ router.get('/sign-out', async (req, res) => {
 // 检查 admin 表是否有 logto_id 列
 async function checkAdminLogtoColumnExists() {
   try {
-    const [columns] = await pool.execute(
-      "SHOW COLUMNS FROM admin LIKE 'logto_id'"
-    );
-    return columns.length > 0;
+    const db = getDB();
+    const columns = await db.raw("SELECT column_name FROM information_schema.columns WHERE table_name = 'admin' AND column_name = 'logto_id'");
+    return columns.rows ? columns.rows.length > 0 : (Array.isArray(columns) ? columns.length > 0 : false);
   } catch (error) {
     console.warn('检查 admin 表 logto_id 列失败:', error.message);
     return false;
@@ -437,10 +428,8 @@ async function findOrCreateAdmin(logtoUser, req) {
     console.log('检测到 admin 表 logto_id 列存在');
     
     // 第一步：尝试通过 logto_id 查找
-    let [admins] = await pool.execute(
-      'SELECT * FROM admin WHERE logto_id = ?',
-      [logtoId]
-    );
+    const db = getDB();
+    const admins = await db('admin').where({ logto_id: logtoId }).select('*');
     
     if (admins.length > 0) {
       admin = admins[0];
@@ -452,35 +441,27 @@ async function findOrCreateAdmin(logtoUser, req) {
     
     // 第二步：尝试通过 username 匹配 Logto 的用户名
     if (logtoUsername) {
-      let [adminsByUsername] = await pool.execute(
-        'SELECT * FROM admin WHERE username = ?',
-        [logtoUsername]
-      );
+      const adminsByUsername = await db('admin').where({ username: logtoUsername }).select('*');
       
       if (adminsByUsername.length > 0) {
         admin = adminsByUsername[0];
         console.log('通过 username 匹配找到管理员:', admin.username);
         
         // 顺便更新 logto_id，方便下次快速查找
-        await pool.execute(
-          'UPDATE admin SET logto_id = ? WHERE id = ?',
-          [logtoId, admin.id]
-        );
+        await db('admin').where({ id: admin.id }).update({ logto_id: logtoId });
         console.log('已补全 logto_id 字段');
         
         // 重新查询带更新后的数据
-        [admins] = await pool.execute('SELECT * FROM admin WHERE id = ?', [admin.id]);
-        return admins[0];
+        const updatedAdmins = await db('admin').where({ id: admin.id }).select('*');
+        return updatedAdmins[0];
       }
     }
   } else {
     console.log('admin 表 logto_id 列不存在，使用 username 查找');
     
     if (logtoUsername) {
-      let [adminsByUsername] = await pool.execute(
-        'SELECT * FROM admin WHERE username = ?',
-        [logtoUsername]
-      );
+      const db = getDB();
+      const adminsByUsername = await db('admin').where({ username: logtoUsername }).select('*');
       
       if (adminsByUsername.length > 0) {
         admin = adminsByUsername[0];
@@ -599,11 +580,16 @@ router.post('/admin/callback', async (req, res) => {
     });
     
     // 清除旧会话并保存新会话
-    await pool.execute('UPDATE admin_sessions SET is_active = 0 WHERE admin_id = ?', [admin.id.toString()]);
-    await pool.execute(
-      'INSERT INTO admin_sessions (admin_id, token, refresh_token, expires_at, user_agent, is_active) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY), ?, 1)',
-      [admin.id.toString(), accessToken, refreshToken, req.headers['user-agent'] || '']
-    );
+    const db = getDB();
+    await db('admin_sessions').where({ admin_id: admin.id.toString() }).update({ is_active: 0 });
+    await db('admin_sessions').insert({
+      admin_id: admin.id.toString(),
+      token: accessToken,
+      refresh_token: refreshToken,
+      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      user_agent: req.headers['user-agent'] || '',
+      is_active: 1
+    });
     
     // 获取管理员权限
     let permissions = [];

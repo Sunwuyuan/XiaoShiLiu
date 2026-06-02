@@ -11,7 +11,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
@@ -222,12 +222,15 @@ router.post('/authserver/refresh', async (req, res) => {
     const newRefreshToken = generateRefreshToken();
     const finalClientToken = clientToken || tokenRecord.client_token;
 
-    await pool.execute(
-      `UPDATE yggdrasil_tokens 
-       SET access_token = ?, refresh_token = ?, client_token = ?, expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY)
-       WHERE id = ?`,
-      [newAccessToken, newRefreshToken, finalClientToken, tokenRecord.id]
-    );
+    const db = getDB();
+    await db('yggdrasil_tokens')
+      .where({ id: tokenRecord.id })
+      .update({
+        access_token: newAccessToken,
+        refresh_token: newRefreshToken,
+        client_token: finalClientToken,
+        expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'")
+      });
 
     let response = {
       accessToken: newAccessToken,
@@ -775,26 +778,24 @@ router.put('/api/user/profile/:uuid/:textureType', verifyTextureAuth, upload.sin
     const updateField = textureType === 'skin' ? 'skin_url' : 'cape_url';
     const modelField = textureType === 'skin' ? 'skin_model' : null;
     
+    const db = getDB();
+    const updateData = { [updateField]: uploadResult.url };
     if (textureType === 'skin' && model) {
-      await pool.execute(
-        `UPDATE mc_profiles SET ${updateField} = ?, ${modelField} = ? WHERE id = ?`,
-        [uploadResult.url, model === 'slim' ? 'slim' : 'classic', profile.id]
-      );
-    } else {
-      await pool.execute(
-        `UPDATE mc_profiles SET ${updateField} = ? WHERE id = ?`,
-        [uploadResult.url, profile.id]
-      );
+      updateData[modelField] = model === 'slim' ? 'slim' : 'classic';
     }
+    
+    await db('mc_profiles')
+      .where({ id: profile.id })
+      .update(updateData);
 
-    await pool.execute(
-      `INSERT INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-       texture_hash = VALUES(texture_hash),
-       url = VALUES(url),
-       metadata = VALUES(metadata),
-       uploaded_at = CURRENT_TIMESTAMP`,
+    await db.raw(
+      `INSERT INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata, uploaded_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (profile_id, texture_type) DO UPDATE SET
+         texture_hash = EXCLUDED.texture_hash,
+         url = EXCLUDED.url,
+         metadata = EXCLUDED.metadata,
+         uploaded_at = CURRENT_TIMESTAMP`,
       [
         profile.id,
         textureType,
@@ -863,10 +864,10 @@ router.delete('/api/user/profile/:uuid/:textureType', verifyTextureAuth, async (
     }
 
     const updateField = textureType === 'skin' ? 'skin_url' : 'cape_url';
-    await pool.execute(
-      `UPDATE mc_profiles SET ${updateField} = NULL WHERE id = ?`,
-      [profile.id]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profile.id })
+      .update({ [updateField]: null });
 
     await auditLog('TEXTURE_DELETE', profile.user_id, profile.id, req.ip, {
       textureType

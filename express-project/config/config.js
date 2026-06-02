@@ -8,7 +8,6 @@
  * @version v1.3.2
  */
 
-const mysql = require('mysql2/promise');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -67,15 +66,9 @@ const config = {
     };
   })(),
 
-  // 数据库配置
+  // 数据库配置（由 knexfile.js 管理）
   database: {
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '123456',
-    database: process.env.DB_NAME || 'yuecommunity',
-    port: process.env.DB_PORT || 3306,
-    charset: 'utf8mb4',
-    timezone: '+08:00'
+    type: process.env.DB_TYPE || (process.env.NODE_ENV === 'production' ? 'pg' : 'sqlite3')
   },
 
   // 上传配置
@@ -211,18 +204,4 @@ const config = {
   }
 };
 
-// 数据库连接池配置
-const dbConfig = {
-  ...config.database,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-};
-
-// 创建连接池
-const pool = mysql.createPool(dbConfig);
-
-module.exports = {
-  ...config,
-  pool
-};
+module.exports = config;

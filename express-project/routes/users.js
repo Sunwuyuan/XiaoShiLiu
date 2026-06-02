@@ -1,10 +1,109 @@
 const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 const { optionalAuth, authenticateToken } = require('../middleware/auth');
 const NotificationHelper = require('../utils/notificationHelper');
 const { sanitizeContent } = require('../utils/contentSecurity');
+
+// 辅助函数：通过悦社号查找用户ID
+async function getUserIdByUserParam(db, userIdParam) {
+  const userRow = await db('users').where({ user_id: userIdParam }).select('id').first();
+  return userRow ? userRow.id : null;
+}
+
+// 辅助函数：获取笔记的附加信息（图片、视频、标签、点赞、收藏状态）
+async function enrichPostsWithDetails(db, rows, currentUserId) {
+  if (!rows || rows.length === 0) return;
+
+  const postIds = rows.map(p => p.id);
+
+  // 批量获取视频信息
+  const videos = await db('post_videos').whereIn('post_id', postIds).select('*');
+  const videoMap = {};
+  videos.forEach(v => { videoMap[v.post_id] = v; });
+
+  // 批量获取图片信息
+  const images = await db('post_images').whereIn('post_id', postIds).select('*');
+  const imageMap = {};
+  images.forEach(img => {
+    if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
+    imageMap[img.post_id].push(img.image_url);
+  });
+
+  // 批量获取标签信息
+  const tags = await db('tags')
+    .join('post_tags', 'tags.id', 'post_tags.tag_id')
+    .whereIn('post_tags.post_id', postIds)
+    .select('post_tags.post_id', 'tags.id', 'tags.name');
+  const tagMap = {};
+  tags.forEach(t => {
+    if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
+    tagMap[t.post_id].push({ id: t.id, name: t.name });
+  });
+
+  // 批量获取点赞状态
+  let likedPostIds = new Set();
+  if (currentUserId) {
+    const likes = await db('likes')
+      .where({ user_id: String(currentUserId), target_type: '1' })
+      .whereIn('target_id', postIds.map(String))
+      .select('target_id');
+    likedPostIds = new Set(likes.map(l => l.target_id.toString()));
+  }
+
+  // 批量获取收藏状态
+  let collectedPostIds = new Set();
+  if (currentUserId) {
+    const collections = await db('collections')
+      .where({ user_id: String(currentUserId) })
+      .whereIn('post_id', postIds.map(String))
+      .select('post_id');
+    collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
+  }
+
+  // 组装数据
+  for (let post of rows) {
+    if (post.type === 2) {
+      const video = videoMap[post.id];
+      post.images = video && video.cover_url ? [video.cover_url] : [];
+      post.video_url = video ? video.video_url : null;
+      post.image = video && video.cover_url ? video.cover_url : null;
+    } else {
+      const postImages = imageMap[post.id] || [];
+      post.images = postImages;
+      post.image = postImages.length > 0 ? postImages[0] : null;
+    }
+    post.tags = tagMap[post.id] || [];
+    post.liked = likedPostIds.has(post.id.toString());
+    post.collected = collectedPostIds.has(post.id.toString());
+  }
+}
+
+// 辅助函数：处理用户列表的关注状态
+function processUserFollowStatus(rows, currentUserId, followingSet, mutualSet) {
+  if (!currentUserId || !rows || rows.length === 0) return;
+
+  for (let user of rows) {
+    const userIdStr = user.id.toString();
+    user.isFollowing = followingSet.has(userIdStr);
+    const isFollowedBy = mutualSet.has(userIdStr);
+    user.isMutual = user.isFollowing && isFollowedBy;
+
+    // 设置按钮类型
+    if (user.id.toString() === currentUserId.toString()) {
+      user.buttonType = 'self';
+    } else if (user.isMutual) {
+      user.buttonType = 'mutual';
+    } else if (user.isFollowing) {
+      user.buttonType = 'unfollow';
+    } else if (isFollowedBy) {
+      user.buttonType = 'back';
+    } else {
+      user.buttonType = 'follow';
+    }
+  }
+}
 
 // 搜索用户（必须放在 /:id 之前）
 router.get('/search', optionalAuth, async (req, res) => {
@@ -19,56 +118,45 @@ router.get('/search', optionalAuth, async (req, res) => {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '请输入搜索关键词' });
     }
 
+    const db = getDB();
+
     // 搜索用户：支持昵称和悦社号搜索
-    const [rows] = await pool.execute(
-      `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.follow_count, u.fans_count, u.like_count, u.created_at, u.verified,
-              (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND status = 0) as post_count
-       FROM users u
-       WHERE u.nickname LIKE ? OR u.user_id LIKE ? 
-       ORDER BY u.created_at DESC 
-       LIMIT ? OFFSET ?`,
-      [`%${keyword}%`, `%${keyword}%`, limit.toString(), offset.toString()]
-    );
+    const rows = await db('users')
+      .where(function() { this.where('nickname', 'like', `%${keyword}%`).orWhere('user_id', 'like', `%${keyword}%`); })
+      .select(
+        'id', 'user_id', 'nickname', 'avatar', 'bio', 'location',
+        'follow_count', 'fans_count', 'like_count', 'created_at', 'verified'
+      )
+      .orderBy('created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
+
+    // 为每个用户添加笔记数
+    for (let user of rows) {
+      const postCount = await db('posts').where({ user_id: user.id, status: 0 }).count('* as count').first();
+      user.post_count = parseInt(postCount.count);
+    }
 
     // 检查关注状态（仅在用户已登录时）
     if (currentUserId && rows.length > 0) {
       const userIds = rows.map(u => u.id.toString());
 
       // 批量获取关注状态
-      const [follows] = await pool.query(
-        'SELECT following_id FROM follows WHERE follower_id = ? AND following_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const follows = await db('follows')
+        .where({ follower_id: String(currentUserId) })
+        .whereIn('following_id', userIds)
+        .select('following_id');
       const followingSet = new Set(follows.map(f => f.following_id.toString()));
 
       // 批量获取互相关注状态
-      const [mutuals] = await pool.query(
-        'SELECT follower_id FROM follows WHERE following_id = ? AND follower_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const mutuals = await db('follows')
+        .where({ following_id: String(currentUserId) })
+        .whereIn('follower_id', userIds)
+        .select('follower_id');
       const mutualSet = new Set(mutuals.map(f => f.follower_id.toString()));
 
-      for (let user of rows) {
-        const userIdStr = user.id.toString();
-        user.isFollowing = followingSet.has(userIdStr);
-        const isFollowedBy = mutualSet.has(userIdStr);
-        user.isMutual = user.isFollowing && isFollowedBy;
-
-        // 设置按钮类型
-        if (user.id.toString() === currentUserId.toString()) {
-          user.buttonType = 'self';
-        } else if (user.isMutual) {
-          user.buttonType = 'mutual';
-        } else if (user.isFollowing) {
-          user.buttonType = 'unfollow';
-        } else if (isFollowedBy) {
-          user.buttonType = 'back';
-        } else {
-          user.buttonType = 'follow';
-        }
-      }
+      processUserFollowStatus(rows, currentUserId, followingSet, mutualSet);
     } else {
-      // 未登录用户，所有用户都显示为未关注状态
       for (let user of rows) {
         user.isFollowing = false;
         user.isMutual = false;
@@ -77,12 +165,11 @@ router.get('/search', optionalAuth, async (req, res) => {
     }
 
     // 获取总数
-    const [countResult] = await pool.execute(
-      `SELECT COUNT(*) as total FROM users 
-       WHERE nickname LIKE ? OR user_id LIKE ?`,
-      [`%${keyword}%`, `%${keyword}%`]
-    );
-    const total = countResult[0].total;
+    const totalResult = await db('users')
+      .where(function() { this.where('nickname', 'like', `%${keyword}%`).orWhere('user_id', 'like', `%${keyword}%`); })
+      .count('* as total')
+      .first();
+    const total = parseInt(totalResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -90,12 +177,7 @@ router.get('/search', optionalAuth, async (req, res) => {
       data: {
         users: rows,
         keyword,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -104,18 +186,17 @@ router.get('/search', optionalAuth, async (req, res) => {
   }
 });
 
-// 获取用户信息
 // 获取用户个性标签
 router.get('/:id/personality-tags', async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
-    // 始终通过悦社号查找用户信息
-    const query = 'SELECT gender, zodiac_sign, mbti, education, major, interests FROM users WHERE user_id = ?';
-    const params = [userIdParam];
 
-    const [rows] = await pool.execute(query, params);
+    const row = await db('users').where({ user_id: userIdParam })
+      .select('gender', 'zodiac_sign', 'mbti', 'education', 'major', 'interests')
+      .first();
 
-    if (rows.length === 0) {
+    if (!row) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
         message: '用户不存在',
@@ -123,9 +204,9 @@ router.get('/:id/personality-tags', async (req, res) => {
       });
     }
 
-    const personalityTags = rows[0];
+    const personalityTags = { ...row };
 
-    // 处理interests字段（如果是JSON字符串则解析）
+    // 处理interests字段
     if (personalityTags.interests) {
       try {
         personalityTags.interests = typeof personalityTags.interests === 'string'
@@ -147,19 +228,26 @@ router.get('/:id/personality-tags', async (req, res) => {
   }
 });
 
+// 获取用户信息
 router.get('/:id', async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
-    // 只通过悦社号(user_id)进行查找
-    const [rows] = await pool.execute(
-      `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.email, u.gender, u.zodiac_sign, u.mbti, u.education, u.major, u.interests, u.follow_count, u.fans_count, u.like_count, u.created_at, u.verified, uv.title as verified_title
-       FROM users u
-       LEFT JOIN user_verification uv ON u.id = uv.user_id AND uv.status = 1
-       WHERE u.user_id = ?`,
-      [userIdParam]
-    );
 
-    if (rows.length === 0) {
+    const row = await db({ u: 'users' })
+      .leftJoin({ uv: 'user_verification' }, function() {
+        this.on('u.id', '=', 'uv.user_id').andOnVal('uv.status', 1);
+      })
+      .where('u.user_id', userIdParam)
+      .select(
+        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.email', 'u.gender', 'u.zodiac_sign', 'u.mbti', 'u.education',
+        'u.major', 'u.interests', 'u.follow_count', 'u.fans_count',
+        'u.like_count', 'u.created_at', 'u.verified', 'uv.title as verified_title'
+      )
+      .first();
+
+    if (!row) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
         message: '用户不存在',
@@ -167,36 +255,26 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    const user = rows[0];
+    const user = { ...row };
 
-    // 处理interests字段（如果是JSON字符串则解析）
+    // 处理interests字段
     if (user.interests) {
       try {
-        user.interests = typeof user.interests === 'string'
-          ? JSON.parse(user.interests)
-          : user.interests;
+        user.interests = typeof user.interests === 'string' ? JSON.parse(user.interests) : user.interests;
       } catch (e) {
         user.interests = null;
       }
     }
 
     // 查询用户的封禁状态
-    const [banResult] = await pool.execute(
-      'SELECT id, reason, end_time, status, created_at FROM user_ban WHERE user_id = ? AND status IN (0, 3) ORDER BY created_at DESC LIMIT 1',
-      [user.id.toString()]
-    );
+    const ban = await db('user_ban')
+      .where({ user_id: String(user.id) })
+      .whereIn('status', [0, 3])
+      .orderBy('created_at', 'desc')
+      .select('id', 'reason', 'end_time', 'status', 'created_at')
+      .first();
 
-    // 添加封禁状态信息
-    if (banResult.length > 0) {
-      const ban = banResult[0];
-      user.ban = {
-        end_time: ban.end_time,
-        reason: ban.reason,
-        created_at: ban.created_at
-      };
-    } else {
-      user.ban = null;
-    }
+    user.ban = ban ? { end_time: ban.end_time, reason: ban.reason, created_at: ban.created_at } : null;
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -212,29 +290,26 @@ router.get('/:id', async (req, res) => {
 // 获取用户列表
 router.get('/', async (req, res) => {
   try {
+    const db = getDB();
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
 
-    const [rows] = await pool.execute(
-      `SELECT id, user_id, nickname, avatar, bio, location, follow_count, fans_count, like_count, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [limit.toString(), offset.toString()]
-    );
+    const rows = await db('users')
+      .select('id', 'user_id', 'nickname', 'avatar', 'bio', 'location', 'follow_count', 'fans_count', 'like_count', 'created_at')
+      .orderBy('created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
 
-    const [countResult] = await pool.execute('SELECT COUNT(*) as total FROM users');
-    const total = countResult[0].total;
+    const countResult = await db('users').count('* as total').first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
         users: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -246,6 +321,7 @@ router.get('/', async (req, res) => {
 // 获取用户发布的笔记列表
 router.get('/:id/posts', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -254,142 +330,78 @@ router.get('/:id/posts', optionalAuth, async (req, res) => {
     const category = req.query.category;
     const keyword = req.query.keyword;
     const sort = req.query.sort || 'created_at';
-    const statusFilter = req.query.status; // 状态筛选参数
+    const statusFilter = req.query.status;
 
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
     // 构建查询条件
-    let whereConditions = ['p.user_id = ?'];
-    let queryParams = [userId.toString()];
+    let query = db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+      .where('p.user_id', String(userId));
 
     // 根据status参数决定查询哪些状态
-    // status=all: 查询已发布(0)、待审核(2)和未过审(3) - 用于笔记管理
-    // status=published: 只查询已发布(0) - 用于个人主页
-    // 默认: 只查询已发布(0)
     if (statusFilter === 'all') {
-      whereConditions.push('p.status IN (0, 2, 3)');
+      query = query.whereIn('p.status', [0, 2, 3]);
     } else {
-      // 默认只查询已发布的笔记
-      whereConditions.push('p.status = 0');
+      query = query.where('p.status', 0);
     }
 
     if (category) {
-      whereConditions.push('p.category_id = ?');
-      queryParams.push(category);
+      query = query.andWhere('p.category_id', category);
     }
 
     if (keyword) {
-      whereConditions.push('(p.title LIKE ? OR p.content LIKE ?)');
-      queryParams.push(`%${keyword}%`, `%${keyword}%`);
+      query = query.andWhere(function() {
+        this.where('p.title', 'like', `%${keyword}%`)
+            .orWhere('p.content', 'like', `%${keyword}%`);
+      });
     }
 
     // 构建排序条件
     const allowedSortFields = ['created_at', 'view_count', 'like_count', 'collect_count', 'comment_count'];
     const sortField = allowedSortFields.includes(sort) ? sort : 'created_at';
-    const orderBy = `ORDER BY p.${sortField} DESC`;
 
     // 查询用户发布的笔记
-    const query = `
-      SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.location, c.name as category
-      FROM posts p
-      LEFT JOIN users u ON p.user_id = u.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE ${whereConditions.join(' AND ')}
-      ${orderBy}
-      LIMIT ? OFFSET ?
-    `;
-    queryParams.push(limit.toString(), offset.toString());
+    const rows = await query
+      .select(
+        'p.*', 'u.nickname', 'u.avatar as user_avatar', 'u.user_id as author_account',
+        'u.location', 'c.name as category'
+      )
+      .orderBy(`p.${sortField}`, 'desc')
+      .limit(limit)
+      .offset(offset);
 
-    const [rows] = await pool.execute(query, queryParams);
-    // 获取每个笔记的图片、标签和用户点赞收藏状态
-    if (rows.length > 0) {
-      const postIds = rows.map(p => p.id);
-
-      // 批量获取视频信息
-      const [videos] = await pool.query('SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (?)', [postIds]);
-      const videoMap = {};
-      videos.forEach(v => { videoMap[v.post_id] = v; });
-
-      // 批量获取图片信息
-      const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds]);
-      const imageMap = {};
-      images.forEach(img => {
-        if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
-        imageMap[img.post_id].push(img.image_url);
-      });
-
-      // 批量获取标签信息
-      const [tags] = await pool.query(
-        'SELECT pt.post_id, t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id IN (?)',
-        [postIds]
-      );
-      const tagMap = {};
-      tags.forEach(t => {
-        if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
-        tagMap[t.post_id].push({ id: t.id, name: t.name });
-      });
-
-      // 批量获取点赞状态
-      let likedPostIds = new Set();
-      if (currentUserId) {
-        const [likes] = await pool.query(
-          'SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        likedPostIds = new Set(likes.map(l => l.target_id.toString()));
-      }
-
-      // 批量获取收藏状态
-      let collectedPostIds = new Set();
-      if (currentUserId) {
-        const [collections] = await pool.query(
-          'SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
-      }
-
-      // 组装数据
-      for (let post of rows) {
-        if (post.type === 2) {
-          const video = videoMap[post.id];
-          post.images = video && video.cover_url ? [video.cover_url] : [];
-          post.video_url = video ? video.video_url : null;
-          post.image = video && video.cover_url ? video.cover_url : null;
-        } else {
-          const postImages = imageMap[post.id] || [];
-          post.images = postImages;
-          post.image = postImages.length > 0 ? postImages[0] : null;
-        }
-        post.tags = tagMap[post.id] || [];
-        post.liked = likedPostIds.has(post.id.toString());
-        post.collected = collectedPostIds.has(post.id.toString());
-      }
-    }
+    // 获取每个笔记的附加信息
+    await enrichPostsWithDetails(db, rows, currentUserId);
 
     // 计算总数时也要考虑筛选条件
-    const countQuery = `SELECT COUNT(*) as total FROM posts p WHERE ${whereConditions.join(' AND ')}`;
-    const countParams = queryParams.slice(0, -2); // 移除limit和offset参数
-    const [countResult] = await pool.execute(countQuery, countParams);
-    const total = countResult[0].total;
-
+    let countQuery = db({ p: 'posts' }).where('p.user_id', String(userId));
+    if (statusFilter === 'all') {
+      countQuery = countQuery.whereIn('p.status', [0, 2, 3]);
+    } else {
+      countQuery = countQuery.where('p.status', 0);
+    }
+    if (category) countQuery = countQuery.andWhere('p.category_id', category);
+    if (keyword) {
+      countQuery = countQuery.andWhere(function() {
+        this.where('p.title', 'like', `%${keyword}%`)
+            .orWhere('p.content', 'like', `%${keyword}%`);
+      });
+    }
+    const countResult = await countQuery.count('* as total').first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
         posts: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -401,113 +413,47 @@ router.get('/:id/posts', optionalAuth, async (req, res) => {
 // 获取用户收藏列表
 router.get('/:id/collections', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const currentUserId = req.user ? req.user.id : null;
 
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
-    const [rows] = await pool.execute(
-      `SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.location, c.created_at as collected_at
-       FROM collections c
-       LEFT JOIN posts p ON c.post_id = p.id
-       LEFT JOIN users u ON p.user_id = u.id
-       WHERE c.user_id = ? AND p.status = 0
-       ORDER BY c.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [userId.toString(), limit.toString(), offset.toString()]
-    );
+    const rows = await db({ c: 'collections' })
+      .leftJoin({ p: 'posts' }, 'c.post_id', 'p.id')
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .where({ 'c.user_id': String(userId), 'p.status': 0 })
+      .select(
+        'p.*', 'u.nickname', 'u.avatar as user_avatar', 'u.user_id as author_account',
+        'u.location', 'c.created_at as collected_at'
+      )
+      .orderBy('c.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
 
-    // 获取每个笔记的图片、标签和用户点赞收藏状态
-    if (rows.length > 0) {
-      const postIds = rows.map(p => p.id);
+    // 获取每个笔记的附加信息
+    await enrichPostsWithDetails(db, rows, currentUserId);
 
-      // 批量获取视频信息
-      const [videos] = await pool.query('SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (?)', [postIds]);
-      const videoMap = {};
-      videos.forEach(v => { videoMap[v.post_id] = v; });
-
-      // 批量获取图片信息
-      const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds]);
-      const imageMap = {};
-      images.forEach(img => {
-        if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
-        imageMap[img.post_id].push(img.image_url);
-      });
-
-      // 批量获取标签信息
-      const [tags] = await pool.query(
-        'SELECT pt.post_id, t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id IN (?)',
-        [postIds]
-      );
-      const tagMap = {};
-      tags.forEach(t => {
-        if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
-        tagMap[t.post_id].push({ id: t.id, name: t.name });
-      });
-
-      // 批量获取点赞状态
-      let likedPostIds = new Set();
-      if (currentUserId) {
-        const [likes] = await pool.query(
-          'SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        likedPostIds = new Set(likes.map(l => l.target_id.toString()));
-      }
-
-      // 批量获取收藏状态
-      let collectedPostIds = new Set();
-      if (currentUserId) {
-        const [collections] = await pool.query(
-          'SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
-      }
-
-      // 组装数据
-      for (let post of rows) {
-        if (post.type === 2) {
-          const video = videoMap[post.id];
-          post.images = video && video.cover_url ? [video.cover_url] : [];
-          post.video_url = video ? video.video_url : null;
-          post.image = video && video.cover_url ? video.cover_url : null;
-        } else {
-          const postImages = imageMap[post.id] || [];
-          post.images = postImages;
-          post.image = postImages.length > 0 ? postImages[0] : null;
-        }
-        post.tags = tagMap[post.id] || [];
-        post.liked = likedPostIds.has(post.id.toString());
-        post.collected = collectedPostIds.has(post.id.toString());
-      }
-    }
-
-    const [countResult] = await pool.execute(
-      'SELECT COUNT(*) as total FROM collections c LEFT JOIN posts p ON c.post_id = p.id WHERE c.user_id = ? AND p.status = 0',
-      [userId.toString()]
-    );
-    const total = countResult[0].total;
+    const countResult = await db({ c: 'collections' })
+      .leftJoin({ p: 'posts' }, 'c.post_id', 'p.id')
+      .where({ 'c.user_id': String(userId), 'p.status': 0 })
+      .count('* as total')
+      .first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
         collections: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -519,114 +465,48 @@ router.get('/:id/collections', optionalAuth, async (req, res) => {
 // 获取用户点赞列表
 router.get('/:id/likes', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const currentUserId = req.user ? req.user.id : null;
 
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
     // 查询笔记列表
-    const [rows] = await pool.execute(
-      `SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.location, l.created_at as liked_at
-       FROM likes l
-       LEFT JOIN posts p ON l.target_id = p.id
-       LEFT JOIN users u ON p.user_id = u.id
-       WHERE l.user_id = ? AND l.target_type = 1 AND p.status = 0
-       ORDER BY l.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [userId.toString(), limit.toString(), offset.toString()]
-    );
+    const rows = await db({ l: 'likes' })
+      .leftJoin({ p: 'posts' }, 'l.target_id', 'p.id')
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .where({ 'l.user_id': String(userId), 'l.target_type': '1', 'p.status': 0 })
+      .select(
+        'p.*', 'u.nickname', 'u.avatar as user_avatar', 'u.user_id as author_account',
+        'u.location', 'l.created_at as liked_at'
+      )
+      .orderBy('l.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
 
-    // 获取每个笔记的图片、标签和用户点赞收藏状态
-    if (rows.length > 0) {
-      const postIds = rows.map(p => p.id);
+    // 获取每个笔记的附加信息
+    await enrichPostsWithDetails(db, rows, currentUserId);
 
-      // 批量获取视频信息
-      const [videos] = await pool.query('SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (?)', [postIds]);
-      const videoMap = {};
-      videos.forEach(v => { videoMap[v.post_id] = v; });
-
-      // 批量获取图片信息
-      const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds]);
-      const imageMap = {};
-      images.forEach(img => {
-        if (!imageMap[img.post_id]) imageMap[img.post_id] = [];
-        imageMap[img.post_id].push(img.image_url);
-      });
-
-      // 批量获取标签信息
-      const [tags] = await pool.query(
-        'SELECT pt.post_id, t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id IN (?)',
-        [postIds]
-      );
-      const tagMap = {};
-      tags.forEach(t => {
-        if (!tagMap[t.post_id]) tagMap[t.post_id] = [];
-        tagMap[t.post_id].push({ id: t.id, name: t.name });
-      });
-
-      // 批量获取点赞状态
-      let likedPostIds = new Set();
-      if (currentUserId) {
-        const [likes] = await pool.query(
-          'SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        likedPostIds = new Set(likes.map(l => l.target_id.toString()));
-      }
-
-      // 批量获取收藏状态
-      let collectedPostIds = new Set();
-      if (currentUserId) {
-        const [collections] = await pool.query(
-          'SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (?)',
-          [currentUserId.toString(), postIds]
-        );
-        collectedPostIds = new Set(collections.map(c => c.post_id.toString()));
-      }
-
-      // 组装数据
-      for (let post of rows) {
-        if (post.type === 2) {
-          const video = videoMap[post.id];
-          post.images = video && video.cover_url ? [video.cover_url] : [];
-          post.video_url = video ? video.video_url : null;
-          post.image = video && video.cover_url ? video.cover_url : null;
-        } else {
-          const postImages = imageMap[post.id] || [];
-          post.images = postImages;
-          post.image = postImages.length > 0 ? postImages[0] : null;
-        }
-        post.tags = tagMap[post.id] || [];
-        post.liked = likedPostIds.has(post.id.toString());
-        post.collected = collectedPostIds.has(post.id.toString());
-      }
-    }
-
-    const [countResult] = await pool.execute(
-      'SELECT COUNT(*) as total FROM likes l LEFT JOIN posts p ON l.target_id = p.id WHERE l.user_id = ? AND l.target_type = 1 AND p.status = 0',
-      [userId.toString()]
-    );
-    const total = countResult[0].total;
+    const countResult = await db({ l: 'likes' })
+      .leftJoin({ p: 'posts' }, 'l.target_id', 'p.id')
+      .where({ 'l.user_id': String(userId), 'l.target_type': '1', 'p.status': 0 })
+      .count('* as total')
+      .first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
         posts: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -638,48 +518,42 @@ router.get('/:id/likes', optionalAuth, async (req, res) => {
 // 关注用户
 router.post('/:id/follow', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const followerId = req.user.id;
 
     // 获取被关注用户的数字ID
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
     // 不能关注自己
-    if (followerId == userId) {
+    if (String(followerId) === String(userId)) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '不能关注自己' });
     }
 
     // 检查是否已经关注
-    const [existingFollow] = await pool.execute(
-      'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
-      [followerId.toString(), userId.toString()]
-    );
+    const existingFollow = await db('follows')
+      .where({ follower_id: String(followerId), following_id: String(userId) })
+      .select('id')
+      .first();
 
-    if (existingFollow.length > 0) {
+    if (existingFollow) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '已经关注了该用户' });
     }
 
     // 添加关注记录
-    await pool.execute(
-      'INSERT INTO follows (follower_id, following_id) VALUES (?, ?)',
-      [followerId.toString(), userId.toString()]
-    );
+    await db('follows').insert({ follower_id: String(followerId), following_id: String(userId) });
 
-    // 更新关注者的关注数
-    await pool.execute('UPDATE users SET follow_count = follow_count + 1 WHERE id = ?', [followerId.toString()]);
-
-    // 更新被关注者的粉丝数
-    await pool.execute('UPDATE users SET fans_count = fans_count + 1 WHERE id = ?', [userId.toString()]);
+    // 更新关注者的关注数和被关注者的粉丝数
+    await db('users').where({ id: followerId }).increment('follow_count', 1);
+    await db('users').where({ id: userId }).increment('fans_count', 1);
 
     // 创建关注通知
     try {
       const notificationData = NotificationHelper.createFollowNotification(userId, followerId);
-      await NotificationHelper.insertNotification(pool, notificationData);
+      await NotificationHelper.insertNotification(notificationData);
     } catch (notificationError) {
       console.error('关注通知创建失败:', notificationError);
     }
@@ -695,41 +569,39 @@ router.post('/:id/follow', authenticateToken, async (req, res) => {
 // 取消关注用户
 router.delete('/:id/follow', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const followerId = req.user.id;
 
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
     // 删除关注记录
-    const [result] = await pool.execute(
-      'DELETE FROM follows WHERE follower_id = ? AND following_id = ?',
-      [followerId.toString(), userId.toString()]
-    );
+    const result = await db('follows')
+      .where({ follower_id: String(followerId), following_id: String(userId) })
+      .del();
 
-    if (result.affectedRows === 0) {
+    if (result === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '关注记录不存在' });
     }
 
-    // 更新关注者的关注数
-    await pool.execute('UPDATE users SET follow_count = follow_count - 1 WHERE id = ?', [followerId.toString()]);
-
-    // 更新被关注者的粉丝数
-    await pool.execute('UPDATE users SET fans_count = fans_count - 1 WHERE id = ?', [userId.toString()]);
+    // 更新关注者的关注数和被关注者的粉丝数
+    await db('users').where({ id: followerId }).decrement('follow_count', 1);
+    await db('users').where({ id: userId }).decrement('fans_count', 1);
 
     // 删除相关的关注通知
-    // 删除关注者发给被关注者的关注通知
-    await pool.execute(
-      'DELETE FROM notifications WHERE user_id = ? AND sender_id = ? AND type = ?',
-      [userId.toString(), followerId.toString(), NotificationHelper.TYPES.FOLLOW.toString()]
-    );
+    await db('notifications')
+      .where({
+        user_id: String(userId),
+        sender_id: String(followerId),
+        type: NotificationHelper.TYPES.FOLLOW
+      })
+      .del();
 
     console.log(`取消关注成功 - 用户ID: ${followerId}, 目标用户ID: ${userId}`);
-    console.log(`已删除相关关注通知 - 接收者: ${userId}, 发送者: ${followerId}`);
     res.json({ code: RESPONSE_CODES.SUCCESS, message: '取消关注成功' });
   } catch (error) {
     console.error('取消关注失败:', error);
@@ -740,16 +612,15 @@ router.delete('/:id/follow', authenticateToken, async (req, res) => {
 // 获取关注状态
 router.get('/:id/follow-status', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const followerId = req.user ? req.user.id : null;
 
     // 获取用户的数字ID
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
     let isFollowing = false;
     let isMutual = false;
@@ -757,42 +628,35 @@ router.get('/:id/follow-status', optionalAuth, async (req, res) => {
 
     // 如果用户已登录，检查关注状态
     if (followerId) {
-      // 检查关注状态
-      const [followResult] = await pool.execute(
-        'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
-        [followerId.toString(), userId.toString()]
-      );
-      isFollowing = followResult.length > 0;
+      const followResult = await db('follows')
+        .where({ follower_id: String(followerId), following_id: String(userId) })
+        .select('id')
+        .first();
+      isFollowing = !!followResult;
 
       // 检查是否互相关注
-      const [mutualResult] = await pool.execute(
-        'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
-        [userId.toString(), followerId.toString()]
-      );
-      isMutual = isFollowing && mutualResult.length > 0;
+      const mutualResult = await db('follows')
+        .where({ follower_id: String(userId), following_id: String(followerId) })
+        .select('id')
+        .first();
+      isMutual = isFollowing && !!mutualResult;
 
       // 确定按钮类型
-      if (userId == followerId) {
+      if (String(userId) === String(followerId)) {
         buttonType = 'self';
       } else if (isMutual) {
         buttonType = 'mutual';
       } else if (isFollowing) {
         buttonType = 'unfollow';
-      } else if (mutualResult.length > 0) {
+      } else if (mutualResult) {
         buttonType = 'back';
       }
     }
-    // 如果用户未登录，保持默认值：isFollowing = false, isMutual = false, buttonType = 'follow'
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
-      data: {
-        followed: isFollowing,
-        isFollowing,
-        isMutual,
-        buttonType
-      }
+      data: { followed: isFollowing, isFollowing, isMutual, buttonType }
     });
   } catch (error) {
     console.error('获取关注状态失败:', error);
@@ -803,69 +667,55 @@ router.get('/:id/follow-status', optionalAuth, async (req, res) => {
 // 获取用户关注列表
 router.get('/:id/following', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const currentUserId = req.user ? req.user.id : null;
 
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
-    // 查询所有关注的用户（包括互相关注）
-    const [rows] = await pool.execute(
-      `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.follow_count, u.fans_count, u.like_count, u.created_at, u.verified,
-              f.created_at as followed_at,
-              (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND status = 0) as post_count
-       FROM follows f
-       LEFT JOIN users u ON f.following_id = u.id
-       WHERE f.follower_id = ?
-       ORDER BY f.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [userId.toString(), limit.toString(), offset.toString()]
-    );
+    // 查询所有关注的用户
+    const rows = await db({ f: 'follows' })
+      .leftJoin({ u: 'users' }, 'f.following_id', 'u.id')
+      .where('f.follower_id', String(userId))
+      .select(
+        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.follow_count', 'u.fans_count', 'u.like_count', 'u.created_at', 'u.verified',
+        'f.created_at as followed_at'
+      )
+      .orderBy('f.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
+
+    // 为每个用户添加笔记数
+    for (let user of rows) {
+      const postCount = await db('posts').where({ user_id: user.id, status: 0 }).count('* as count').first();
+      user.post_count = parseInt(postCount.count);
+    }
 
     // 检查当前用户与这些用户的关注状态
     if (currentUserId && rows.length > 0) {
       const userIds = rows.map(u => u.id.toString());
 
-      // 批量获取关注状态
-      const [follows] = await pool.query(
-        'SELECT following_id FROM follows WHERE follower_id = ? AND following_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const follows = await db('follows')
+        .where({ follower_id: String(currentUserId) })
+        .whereIn('following_id', userIds)
+        .select('following_id');
       const followingSet = new Set(follows.map(f => f.following_id.toString()));
 
-      // 批量获取互相关注状态
-      const [mutuals] = await pool.query(
-        'SELECT follower_id FROM follows WHERE following_id = ? AND follower_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const mutuals = await db('follows')
+        .where({ following_id: String(currentUserId) })
+        .whereIn('follower_id', userIds)
+        .select('follower_id');
       const mutualSet = new Set(mutuals.map(f => f.follower_id.toString()));
 
-      for (let user of rows) {
-        const userIdStr = user.id.toString();
-        user.isFollowing = followingSet.has(userIdStr);
-        const isFollowedBy = mutualSet.has(userIdStr);
-        user.isMutual = user.isFollowing && isFollowedBy;
-
-        // 设置按钮类型
-        if (user.id.toString() === currentUserId.toString()) {
-          user.buttonType = 'self';
-        } else if (user.isMutual) {
-          user.buttonType = 'mutual';
-        } else if (user.isFollowing) {
-          user.buttonType = 'unfollow';
-        } else if (isFollowedBy) {
-          user.buttonType = 'back';
-        } else {
-          user.buttonType = 'follow';
-        }
-      }
+      processUserFollowStatus(rows, currentUserId, followingSet, mutualSet);
     } else {
       for (let user of rows) {
         user.isFollowing = false;
@@ -874,25 +724,16 @@ router.get('/:id/following', optionalAuth, async (req, res) => {
       }
     }
 
-    // 计算所有关注的总数（包括互相关注）
-    const [countResult] = await pool.execute(
-      `SELECT COUNT(*) as total FROM follows f
-       WHERE f.follower_id = ?`,
-      [userId.toString()]
-    );
-    const total = countResult[0].total;
+    // 计算所有关注的总数
+    const countResult = await db('follows').where({ follower_id: String(userId) }).count('* as total').first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
         following: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -904,70 +745,54 @@ router.get('/:id/following', optionalAuth, async (req, res) => {
 // 获取用户粉丝列表
 router.get('/:id/followers', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const currentUserId = req.user ? req.user.id : null;
 
-    console.log(`获取粉丝列表 - 用户ID: ${userIdParam}, 当前用户ID: ${currentUserId}`);
-
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
-    const [rows] = await pool.execute(
-      `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.follow_count, u.fans_count, u.like_count, u.created_at, u.verified,
-              f.created_at as followed_at,
-              (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND status = 0) as post_count
-       FROM follows f
-       LEFT JOIN users u ON f.follower_id = u.id
-       WHERE f.following_id = ?
-       ORDER BY f.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [userId.toString(), limit.toString(), offset.toString()]
-    );
+    const rows = await db({ f: 'follows' })
+      .leftJoin({ u: 'users' }, 'f.follower_id', 'u.id')
+      .where('f.following_id', String(userId))
+      .select(
+        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.follow_count', 'u.fans_count', 'u.like_count', 'u.created_at', 'u.verified',
+        'f.created_at as followed_at'
+      )
+      .orderBy('f.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
+
+    // 为每个用户添加笔记数
+    for (let user of rows) {
+      const postCount = await db('posts').where({ user_id: user.id, status: 0 }).count('* as count').first();
+      user.post_count = parseInt(postCount.count);
+    }
 
     // 检查当前用户与这些用户的关注状态
     if (currentUserId && rows.length > 0) {
       const userIds = rows.map(u => u.id.toString());
 
-      // 批量获取关注状态
-      const [follows] = await pool.query(
-        'SELECT following_id FROM follows WHERE follower_id = ? AND following_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const follows = await db('follows')
+        .where({ follower_id: String(currentUserId) })
+        .whereIn('following_id', userIds)
+        .select('following_id');
       const followingSet = new Set(follows.map(f => f.following_id.toString()));
 
-      // 批量获取互相关注状态
-      const [mutuals] = await pool.query(
-        'SELECT follower_id FROM follows WHERE following_id = ? AND follower_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const mutuals = await db('follows')
+        .where({ following_id: String(currentUserId) })
+        .whereIn('follower_id', userIds)
+        .select('follower_id');
       const mutualSet = new Set(mutuals.map(f => f.follower_id.toString()));
 
-      for (let user of rows) {
-        const userIdStr = user.id.toString();
-        user.isFollowing = followingSet.has(userIdStr);
-        const isFollowedBy = mutualSet.has(userIdStr);
-        user.isMutual = user.isFollowing && isFollowedBy;
-
-        // 设置按钮类型
-        if (user.id.toString() === currentUserId.toString()) {
-          user.buttonType = 'self';
-        } else if (user.isMutual) {
-          user.buttonType = 'mutual';
-        } else if (user.isFollowing) {
-          user.buttonType = 'unfollow';
-        } else if (isFollowedBy) {
-          user.buttonType = 'back';
-        } else {
-          user.buttonType = 'follow';
-        }
-      }
+      processUserFollowStatus(rows, currentUserId, followingSet, mutualSet);
     } else {
       for (let user of rows) {
         user.isFollowing = false;
@@ -976,20 +801,15 @@ router.get('/:id/followers', optionalAuth, async (req, res) => {
       }
     }
 
-    const [countResult] = await pool.execute('SELECT COUNT(*) as total FROM follows WHERE following_id = ?', [userId.toString()]);
-    const total = countResult[0].total;
+    const countResult = await db('follows').where({ following_id: String(userId) }).count('* as total').first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
         followers: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -1001,78 +821,63 @@ router.get('/:id/followers', optionalAuth, async (req, res) => {
 // 获取互相关注列表
 router.get('/:id/mutual-follows', optionalAuth, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const currentUserId = req.user ? req.user.id : null;
 
-    console.log(`获取互关列表 - 用户ID: ${userIdParam}, 当前用户ID: ${currentUserId}`);
-
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
     // 查询互关用户
-    const [rows] = await pool.execute(
-      `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.follow_count, u.fans_count, u.like_count, u.created_at, u.verified,
-              (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND status = 0) as post_count
-       FROM users u
-       WHERE u.id IN (
-         SELECT f1.following_id 
-         FROM follows f1
-         WHERE f1.follower_id = ? 
-         AND EXISTS (
-           SELECT 1 FROM follows f2 
-           WHERE f2.follower_id = f1.following_id 
-           AND f2.following_id = ?
-         )
-       )
-       ORDER BY u.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [userId.toString(), userId.toString(), limit.toString(), offset.toString()]
-    );
+    const rows = await db({ u: 'users' })
+      .whereIn('u.id', function(subQ) {
+        subQ.select('f1.following_id')
+          .from('follows as f1')
+          .where('f1.follower_id', String(userId))
+          .whereExists(function(existsQ) {
+            existsQ.select(1)
+              .from('follows as f2')
+              .whereRaw('f2.follower_id = f1.following_id')
+              .andWhere('f2.following_id', String(userId));
+          });
+      })
+      .select(
+        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.follow_count', 'u.fans_count', 'u.like_count', 'u.created_at', 'u.verified'
+      )
+      .orderBy('u.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
+
+    // 为每个用户添加笔记数
+    for (let user of rows) {
+      const postCount = await db('posts').where({ user_id: user.id, status: 0 }).count('* as count').first();
+      user.post_count = parseInt(postCount.count);
+    }
 
     // 检查当前用户与这些用户的关注状态
     if (currentUserId && rows.length > 0) {
       const userIds = rows.map(u => u.id.toString());
 
-      // 批量获取关注状态
-      const [follows] = await pool.query(
-        'SELECT following_id FROM follows WHERE follower_id = ? AND following_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const follows = await db('follows')
+        .where({ follower_id: String(currentUserId) })
+        .whereIn('following_id', userIds)
+        .select('following_id');
       const followingSet = new Set(follows.map(f => f.following_id.toString()));
 
-      // 批量获取互相关注状态
-      const [mutuals] = await pool.query(
-        'SELECT follower_id FROM follows WHERE following_id = ? AND follower_id IN (?)',
-        [currentUserId.toString(), userIds]
-      );
+      const mutuals = await db('follows')
+        .where({ following_id: String(currentUserId) })
+        .whereIn('follower_id', userIds)
+        .select('follower_id');
       const mutualSet = new Set(mutuals.map(f => f.follower_id.toString()));
 
-      for (let user of rows) {
-        const userIdStr = user.id.toString();
-        user.isFollowing = followingSet.has(userIdStr);
-        const isFollowedBy = mutualSet.has(userIdStr);
-        user.isMutual = user.isFollowing && isFollowedBy;
-
-        // 设置按钮类型
-        if (user.id.toString() === currentUserId.toString()) {
-          user.buttonType = 'self';
-        } else if (user.isMutual) {
-          user.buttonType = 'mutual';
-        } else if (user.isFollowing) {
-          user.buttonType = 'unfollow';
-        } else if (isFollowedBy) {
-          user.buttonType = 'back';
-        } else {
-          user.buttonType = 'follow';
-        }
-      }
+      processUserFollowStatus(rows, currentUserId, followingSet, mutualSet);
     } else {
       for (let user of rows) {
         user.isFollowing = false;
@@ -1082,33 +887,28 @@ router.get('/:id/mutual-follows', optionalAuth, async (req, res) => {
     }
 
     // 获取互关总数
-    const [countResult] = await pool.execute(
-      `SELECT COUNT(*) as total FROM users u
-       WHERE u.id IN (
-         SELECT f1.following_id 
-         FROM follows f1
-         WHERE f1.follower_id = ? 
-         AND EXISTS (
-           SELECT 1 FROM follows f2 
-           WHERE f2.follower_id = f1.following_id 
-           AND f2.following_id = ?
-         )
-       )`,
-      [userId, userId]
-    );
-    const total = countResult[0].total;
+    const countResult = await db({ u: 'users' })
+      .whereIn('u.id', function(subQ) {
+        subQ.select('f1.following_id')
+          .from('follows as f1')
+          .where('f1.follower_id', String(userId))
+          .whereExists(function(existsQ) {
+            existsQ.select(1)
+              .from('follows as f2')
+              .whereRaw('f2.follower_id = f1.following_id')
+              .andWhere('f2.following_id', String(userId));
+          });
+      })
+      .count('* as total')
+      .first();
+    const total = parseInt(countResult.total);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
         mutualFollows: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     });
   } catch (error) {
@@ -1120,50 +920,49 @@ router.get('/:id/mutual-follows', optionalAuth, async (req, res) => {
 // 获取用户统计信息
 router.get('/:id/stats', async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
-    console.log(`获取用户统计信息 - 用户ID: ${userIdParam}`);
 
     // 通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    const userId = await getUserIdByUserParam(db, userIdParam);
+    if (!userId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const userId = userRows[0].id;
 
     // 获取用户基本统计信息
-    const [userStats] = await pool.execute(
-      'SELECT follow_count, fans_count, like_count FROM users WHERE id = ?',
-      [userId.toString()]
-    );
+    const userStats = await db('users')
+      .where({ id: String(userId) })
+      .select('follow_count', 'fans_count', 'like_count')
+      .first();
 
-    if (userStats.length === 0) {
+    if (!userStats) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
 
     // 获取笔记数量
-    const [postCount] = await pool.execute(
-      'SELECT COUNT(*) as count FROM posts WHERE user_id = ? AND status = 0',
-      [userId.toString()]
-    );
+    const postCount = await db('posts')
+      .where({ user_id: String(userId), status: 0 })
+      .count('* as count')
+      .first();
 
     // 获取该用户发布的笔记被收藏的总数量
-    const [collectCount] = await pool.execute(
-      'SELECT COUNT(*) as count FROM collections c JOIN posts p ON c.post_id = p.id WHERE p.user_id = ? AND p.status = 0',
-      [userId.toString()]
-    );
+    const collectCount = await db({ c: 'collections' })
+      .join({ p: 'posts' }, 'c.post_id', 'p.id')
+      .where({ 'p.user_id': String(userId), 'p.status': 0 })
+      .count('* as count')
+      .first();
 
     // 计算获赞与收藏总数
-    const likesAndCollects = userStats[0].like_count + collectCount[0].count;
+    const likesAndCollects = parseInt(userStats.like_count) + parseInt(collectCount.count);
 
     const stats = {
-      follow_count: userStats[0].follow_count,
-      fans_count: userStats[0].fans_count,
-      post_count: postCount[0].count,
-      like_count: userStats[0].like_count,
-      collect_count: collectCount[0].count,
+      follow_count: userStats.follow_count,
+      fans_count: userStats.fans_count,
+      post_count: parseInt(postCount.count),
+      like_count: userStats.like_count,
+      collect_count: parseInt(collectCount.count),
       likes_and_collects: likesAndCollects
     };
-
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -1179,18 +978,16 @@ router.get('/:id/stats', async (req, res) => {
 // 更新用户资料（用户自己）
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
+    const db = getDB();
     const userIdParam = req.params.id;
     const currentUserId = req.user.id;
     const { nickname, avatar, bio, location, gender, zodiac_sign, mbti, education, major, interests } = req.body;
 
-    console.log(`用户更新资料 - 目标用户ID: ${userIdParam}, 当前用户ID: ${currentUserId}`);
-
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
+    // 通过悦社号查找对应的数字ID
+    const targetUserId = await getUserIdByUserParam(db, userIdParam);
+    if (!targetUserId) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
-    const targetUserId = userRows[0].id;
 
     // 检查是否是用户本人
     if (currentUserId !== targetUserId) {
@@ -1202,341 +999,26 @@ router.put('/:id', authenticateToken, async (req, res) => {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '昵称不能为空' });
     }
 
-    // 构建更新SQL
-    let updateFields = [];
-    let updateValues = [];
+    // 构建更新数据
+    const updateData = { nickname: sanitizeContent(nickname.trim()) };
 
-    updateFields.push('nickname = ?');
-    updateValues.push(sanitizeContent(nickname.trim()));
+    if (avatar !== undefined) updateData.avatar = avatar || '';
+    if (bio !== undefined) updateData.bio = sanitizeContent(bio || '');
+    if (location !== undefined) updateData.location = location || '';
+    if (gender !== undefined) updateData.gender = gender || null;
+    if (zodiac_sign !== undefined) updateData.zodiac_sign = zodiac_sign || null;
+    if (mbti !== undefined) updateData.mbti = mbti || null;
+    if (education !== undefined) updateData.education = education || null;
+    if (major !== undefined) updateData.major = major || null;
+    if (interests !== undefined) updateData.interests = typeof interests === 'object' ? JSON.stringify(interests) : interests || null;
 
-    if (avatar !== undefined) {
-      updateFields.push('avatar = ?');
-      updateValues.push(avatar || '');
-    }
+    await db('users').where({ id: targetUserId }).update(updateData);
 
-    if (bio !== undefined) {
-      updateFields.push('bio = ?');
-      updateValues.push(sanitizeContent(bio || ''));
-    }
-
-    if (location !== undefined) {
-      updateFields.push('location = ?');
-      updateValues.push(location || '');
-    }
-
-    if (gender !== undefined) {
-      updateFields.push('gender = ?');
-      updateValues.push(gender || null);
-    }
-
-    if (zodiac_sign !== undefined) {
-      updateFields.push('zodiac_sign = ?');
-      updateValues.push(zodiac_sign || null);
-    }
-
-    if (mbti !== undefined) {
-      updateFields.push('mbti = ?');
-      updateValues.push(mbti || null);
-    }
-
-    if (education !== undefined) {
-      updateFields.push('education = ?');
-      updateValues.push(education || null);
-    }
-
-    if (major !== undefined) {
-      updateFields.push('major = ?');
-      updateValues.push(major || null);
-    }
-
-    if (interests !== undefined) {
-      // 处理兴趣爱好数组，转换为JSON字符串
-      const processedInterests = interests ? (Array.isArray(interests) ? JSON.stringify(interests) : interests) : null;
-      updateFields.push('interests = ?');
-      updateValues.push(processedInterests);
-    }
-
-    updateValues.push(targetUserId);
-
-    // 更新用户资料
-    await pool.execute(
-      `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`,
-      updateValues
-    );
-
-    // 获取更新后的用户信息
-    const [updatedUser] = await pool.execute(
-      'SELECT id, user_id, nickname, avatar, bio, location, email, gender, zodiac_sign, mbti, education, major, interests, follow_count, fans_count, like_count FROM users WHERE id = ?',
-      [targetUserId.toString()]
-    );
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: '资料更新成功',
-      success: true,
-      data: updatedUser[0]
-    });
+    console.log(`用户更新资料成功 - 用户ID: ${currentUserId}`);
+    res.json({ code: RESPONSE_CODES.SUCCESS, message: '资料更新成功' });
   } catch (error) {
     console.error('更新用户资料失败:', error);
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
-  }
-});
-
-// 修改密码
-router.put('/:id/password', authenticateToken, async (req, res) => {
-  try {
-    const userIdParam = req.params.id;
-    const currentUserId = req.user.id;
-    const { currentPassword, newPassword } = req.body;
-
-    console.log(`用户修改密码 - 目标用户ID: ${userIdParam}, 当前用户ID: ${currentUserId}`);
-
-    // 验证必填字段
-    if (!currentPassword || !newPassword) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '当前密码和新密码不能为空' });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '新密码长度不能少于6位' });
-    }
-
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
-      return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
-    }
-    const targetUserId = userRows[0].id;
-
-    // 检查是否是用户本人
-    if (currentUserId !== targetUserId) {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '只能修改自己的密码' });
-    }
-
-    // 验证当前密码（使用SHA2哈希比较）
-    const [passwordRows] = await pool.execute(
-      'SELECT password FROM users WHERE id = ? AND password = SHA2(?, 256)',
-      [targetUserId.toString(), currentPassword]
-    );
-
-    if (passwordRows.length === 0) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '当前密码错误' });
-    }
-
-    // 更新密码（使用SHA2哈希加密）
-    await pool.execute(
-      'UPDATE users SET password = SHA2(?, 256) WHERE id = ?',
-      [newPassword, targetUserId.toString()]
-    );
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: '密码修改成功',
-      success: true
-    });
-  } catch (error) {
-    console.error('修改密码失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
-  }
-});
-
-// 删除账号
-router.delete('/:id', authenticateToken, async (req, res) => {
-  const connection = await pool.getConnection();
-  try {
-    const userIdParam = req.params.id;
-    const currentUserId = req.user.id;
-    // 始终通过悦社号查找对应的数字ID
-    const [userRows] = await connection.execute('SELECT id FROM users WHERE user_id = ?', [userIdParam]);
-    if (userRows.length === 0) {
-      return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
-    }
-    const targetUserId = userRows[0].id;
-
-    // 检查是否是用户本人
-    if (currentUserId !== targetUserId) {
-      return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '只能删除自己的账号' });
-    }
-
-    // 开始事务
-    await connection.beginTransaction();
-    // 删除用户相关的所有数据
-    await connection.execute('DELETE FROM comments WHERE user_id = ?', [targetUserId]);
-    await connection.execute('DELETE FROM likes WHERE user_id = ?', [targetUserId]);
-    await connection.execute('DELETE FROM collections WHERE user_id = ?', [targetUserId]);
-    await connection.execute('DELETE FROM follows WHERE follower_id = ? OR following_id = ?', [targetUserId, targetUserId]);
-    await connection.execute('DELETE FROM notifications WHERE user_id = ? OR sender_id = ?', [targetUserId, targetUserId]);
-    await connection.execute('DELETE FROM posts WHERE user_id = ?', [targetUserId]);
-    await connection.execute('DELETE FROM users WHERE id = ?', [targetUserId]);
-    // 提交事务
-    await connection.commit();
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: '账号删除成功',
-      success: true
-    });
-  } catch (error) {
-    // 回滚事务
-    await connection.rollback();
-    console.error('删除账号失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
-  } finally {
-    connection.release();
-  }
-});
-
-// 提交认证申请
-router.post('/verification', authenticateToken, async (req, res) => {
-  try {
-    const { type, real_name, id_card, contact_name, contact_phone, title, description } = req.body;
-    const userId = req.user.id;
-
-    // 验证输入
-    if (!type || !real_name || !id_card) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({
-        code: RESPONSE_CODES.VALIDATION_ERROR,
-        message: '认证类型、真实姓名和身份证号/信用代码是必填项'
-      });
-    }
-
-    // 验证认证类型
-    if (type !== 1 && type !== 2) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({
-        code: RESPONSE_CODES.VALIDATION_ERROR,
-        message: '无效的认证类型'
-      });
-    }
-
-    // 检查是否已有认证记录
-    const [existingVerification] = await pool.execute(
-      'SELECT id, status FROM user_verification WHERE user_id = ?',
-      [userId.toString()]
-    );
-
-    if (existingVerification.length > 0) {
-      const existingStatus = existingVerification[0].status;
-      // 如果已有记录且状态为待审核(0)，则不允许重复提交
-      if (existingStatus === 0) {
-        return res.status(HTTP_STATUS.BAD_REQUEST).json({
-          code: RESPONSE_CODES.VALIDATION_ERROR,
-          message: '您已有认证申请正在审核中，请耐心等待'
-        });
-      }
-      // 如果已有记录且状态为已通过(1)，则不允许重复提交
-      if (existingStatus === 1) {
-        return res.status(HTTP_STATUS.BAD_REQUEST).json({
-          code: RESPONSE_CODES.VALIDATION_ERROR,
-          message: '您已通过认证，无需重复申请'
-        });
-      }
-      // 如果已有记录且状态为已拒绝(2)，则要求先撤回再提交
-      if (existingStatus === 2) {
-        return res.status(HTTP_STATUS.BAD_REQUEST).json({
-          code: RESPONSE_CODES.VALIDATION_ERROR,
-          message: '您的认证申请已被拒绝，如需重新申请请先撤回当前认证'
-        });
-      }
-    }
-
-    // 插入认证记录，状态为待审核(0)
-    const [result] = await pool.execute(
-      'INSERT INTO user_verification (user_id, type, status, real_name, id_card, contact_name, contact_phone, title, description, created_at) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, NOW())',
-      [userId.toString(), type.toString(), real_name, id_card, contact_name || null, contact_phone || null, title || null, description || null]
-    );
-
-    // 同时在audit表中添加审核记录
-    await pool.execute(
-      'INSERT INTO audit (type, target_id, status, created_at) VALUES (?, ?, 0, NOW())',
-      [type.toString(), userId.toString()]
-    );
-
-    res.status(HTTP_STATUS.CREATED).json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: '认证申请提交成功，请耐心等待审核',
-      data: {
-        verificationId: result.insertId
-      }
-    });
-  } catch (error) {
-    console.error('提交认证申请错误:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.SERVER_ERROR,
-      message: ERROR_MESSAGES.SERVER_ERROR
-    });
-  }
-});
-
-// 获取用户认证状态
-router.get('/verification/status', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    // 获取用户的认证申请记录，关联audit表获取审核时间和备注
-    const [verifications] = await pool.execute(
-      'SELECT uv.id, uv.type, uv.status, uv.real_name, uv.id_card, uv.contact_name, uv.contact_phone, uv.title, uv.created_at, a.audit_time, a.remark FROM user_verification uv LEFT JOIN audit a ON uv.user_id = a.target_id AND a.type = uv.type WHERE uv.user_id = ? ORDER BY uv.created_at DESC',
-      [userId.toString()]
-    );
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: 'success',
-      data: verifications
-    });
-  } catch (error) {
-    console.error('获取认证状态错误:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.SERVER_ERROR,
-      message: ERROR_MESSAGES.SERVER_ERROR
-    });
-  }
-});
-
-// 撤回认证申请
-router.delete('/verification/revoke', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    // 查找用户的认证申请（包括待审核、已通过和已拒绝的）
-    const [existingVerifications] = await pool.execute(
-      'SELECT id, status FROM user_verification WHERE user_id = ?',
-      [userId.toString()]
-    );
-
-    if (existingVerifications.length === 0) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({
-        code: RESPONSE_CODES.VALIDATION_ERROR,
-        message: '没有找到可撤回的认证申请'
-      });
-    }
-
-    // 删除认证申请记录
-    await pool.execute(
-      'DELETE FROM user_verification WHERE user_id = ?',
-      [userId.toString()]
-    );
-
-    // 同时删除audit表中的相关记录
-    await pool.execute(
-      'DELETE FROM audit WHERE target_id = ?',
-      [userId.toString()]
-    );
-
-    // 将用户的verified字段重置为0
-    await pool.execute(
-      'UPDATE users SET verified = 0 WHERE id = ?',
-      [userId.toString()]
-    );
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: '认证申请已撤回'
-    });
-  } catch (error) {
-    console.error('撤回认证申请错误:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.SERVER_ERROR,
-      message: ERROR_MESSAGES.SERVER_ERROR
-    });
   }
 });
 

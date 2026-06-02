@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { HTTP_STATUS, RESPONSE_CODES } = require('../constants')
-const { pool } = require('../config/config')
+const { getDB } = require('../utils/db')
 const { createCrudHandlers } = require('../middleware/crudFactory')
 const { recordExists } = require('../utils/dbHelper')
 const { adminAuth } = require('../utils/uploadHelper')
@@ -49,7 +49,8 @@ const postsCrudConfig = {
     const { user_id, images, image_urls, tags, video_upload, video, video_url, cover_url } = data
 
     // 检查用户是否存在
-    const [userResult] = await pool.execute('SELECT id FROM users WHERE id = ?', [String(user_id)])
+    const db = getDB();
+    const userResult = await db('users').where({ id: String(user_id) }).select('id')
     if (userResult.length === 0) {
       return { isValid: false, message: '用户不存在' }
     }
@@ -84,6 +85,22 @@ const postsCrudConfig = {
 
   // 创建后的处理（处理图片和标签）
   afterCreate: async (postId, data, req) => {
+    // 确保 postId 是纯数字（PostgreSQL returning 可能返回各种格式）
+    let resolvedPostId = postId
+    if (postId === null || postId === undefined) {
+      console.error('afterCreate: postId 为空!', { postId, data: !!data })
+      return
+    }
+    if (typeof postId === 'object') {
+      resolvedPostId = postId.id || postId[0] || JSON.stringify(postId)
+    }
+    // 最终确保是数字字符串
+    resolvedPostId = String(resolvedPostId).replace(/[^\d]/g, '')
+    if (!resolvedPostId) {
+      console.error('afterCreate: 无法解析 postId!', { original: postId })
+      return
+    }
+
     // 从req._postData获取关联数据（在beforeCreate中保存的）
     const postData = req._postData || {}
     const { images, image_urls, tags } = postData
@@ -119,13 +136,14 @@ const postsCrudConfig = {
 
       // 插入图片
       if (allImages.length > 0) {
+        const db = getDB();
         for (const imageUrl of allImages) {
           const cleanUrl = imageUrl ? imageUrl.trim().replace(/\`/g, '').replace(/\s+/g, '') : ''
           if (cleanUrl) {
-            await pool.execute(
-              'INSERT INTO post_images (post_id, image_url) VALUES (?, ?)',
-              [String(postId), cleanUrl]
-            )
+            await db('post_images').insert({
+              post_id: String(resolvedPostId),
+              image_url: cleanUrl
+            })
           }
         }
       }
@@ -133,6 +151,7 @@ const postsCrudConfig = {
 
     // 处理标签
     if (tags && tags.length > 0) {
+      const db = getDB();
       for (const tag of tags) {
         let tagId
         let tagName
@@ -141,20 +160,14 @@ const postsCrudConfig = {
         if (typeof tag === 'string') {
           tagName = tag
           // 查找现有标签
-          const [existingTag] = await pool.execute(
-            'SELECT id FROM tags WHERE name = ?',
-            [tagName]
-          )
+          const existingTag = await db('tags').where({ name: tagName }).select('id')
 
           if (existingTag.length > 0) {
             tagId = String(existingTag[0].id)
           } else {
             // 创建新标签
-            const [tagResult] = await pool.execute(
-              'INSERT INTO tags (name) VALUES (?)',
-              [tagName]
-            )
-            tagId = String(tagResult.insertId)
+            const tagResult = await db('tags').insert({ name: tagName })
+            tagId = String(tagResult[0])
           }
         } else {
           // 处理对象格式的标签（向后兼容）
@@ -163,44 +176,37 @@ const postsCrudConfig = {
 
           // 如果是新标签，先创建标签
           if (tag.is_new || String(tag.id).startsWith('temp_')) {
-            const [existingTag] = await pool.execute(
-              'SELECT id FROM tags WHERE name = ?',
-              [tag.name]
-            )
+            const existingTag = await db('tags').where({ name: tag.name }).select('id')
 
             if (existingTag.length > 0) {
               tagId = String(existingTag[0].id)
             } else {
-              const [tagResult] = await pool.execute(
-                'INSERT INTO tags (name) VALUES (?)',
-                [tag.name]
-              )
-              tagId = String(tagResult.insertId)
+              const tagResult = await db('tags').insert({ name: tag.name })
+              tagId = String(tagResult[0])
             }
           }
         }
 
         // 关联笔记和标签
-        await pool.execute(
-          'INSERT INTO post_tags (post_id, tag_id) VALUES (?, ?)',
-          [String(postId), String(tagId)]
-        )
+        await db('post_tags').insert({
+          post_id: String(resolvedPostId),
+          tag_id: String(tagId)
+        })
 
         // 更新标签使用次数
-        await pool.execute(
-          'UPDATE tags SET use_count = use_count + 1 WHERE id = ?',
-          [String(tagId)]
-        )
+        await db('tags').where({ id: String(tagId) }).increment('use_count', 1)
       }
     }
 
     // 处理视频 - 存储到post_videos表
     const { video_url, cover_url } = postData
     if (video_url) {
-      await pool.execute(
-        'INSERT INTO post_videos (post_id, video_url, cover_url) VALUES (?, ?, ?)',
-        [String(postId), video_url, cover_url || null]
-      )
+      const db = getDB();
+      await db('post_videos').insert({
+        post_id: String(postId),
+        video_url: video_url,
+        cover_url: cover_url || null
+      })
     }
   },
 
@@ -221,7 +227,8 @@ const postsCrudConfig = {
     // 更新图片信息
     if (images !== undefined || image_urls !== undefined) {
       // 删除原有图片
-      await pool.execute('DELETE FROM post_images WHERE post_id = ?', [String(postId)])
+      const db = getDB();
+      await db('post_images').where({ post_id: String(postId) }).del()
 
       // 使用Set来避免重复的图片URL
       const allImagesSet = new Set()
@@ -255,13 +262,14 @@ const postsCrudConfig = {
       // 插入新图片
       const allImages = Array.from(allImagesSet)
       if (allImages.length > 0) {
+        const db = getDB();
         for (const imageUrl of allImages) {
           const cleanUrl = imageUrl ? imageUrl.trim().replace(/\`/g, '').replace(/\s+/g, '') : ''
           if (cleanUrl) {
-            await pool.execute(
-              'INSERT INTO post_images (post_id, image_url) VALUES (?, ?)',
-              [postId, cleanUrl]
-            )
+            await db('post_images').insert({
+              post_id: postId,
+              image_url: cleanUrl
+            })
           }
         }
       }
@@ -272,10 +280,11 @@ const postsCrudConfig = {
 
     if (hasVideoUpdate) {
       // 获取原有视频记录用于清理文件
-      const [oldVideoRows] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [String(postId)])
+      const db = getDB();
+      const oldVideoRows = await db('post_videos').where({ post_id: String(postId) }).select('video_url', 'cover_url')
 
       // 删除原有视频记录
-      await pool.execute('DELETE FROM post_videos WHERE post_id = ?', [String(postId)])
+      await db('post_videos').where({ post_id: String(postId) }).del()
 
       // 清理废弃的视频文件
       if (oldVideoRows.length > 0) {
@@ -306,34 +315,32 @@ const postsCrudConfig = {
       }
 
       if (videoUrl) {
-        await pool.execute(
-          'INSERT INTO post_videos (post_id, video_url, cover_url) VALUES (?, ?, ?)',
-          [postId, videoUrl, coverUrl]
-        )
+        const db = getDB();
+        await db('post_videos').insert({
+          post_id: postId,
+          video_url: videoUrl,
+          cover_url: coverUrl
+        })
       }
     }
 
     // 更新标签信息
     if (tags !== undefined) {
       // 获取原有标签，用于更新使用次数
-      const [oldTags] = await pool.execute(
-        'SELECT tag_id FROM post_tags WHERE post_id = ?',
-        [postId]
-      )
+      const db = getDB();
+      const oldTags = await db('post_tags').where({ post_id: postId }).select('tag_id')
 
       // 删除原有标签关联
-      await pool.execute('DELETE FROM post_tags WHERE post_id = ?', [postId])
+      await db('post_tags').where({ post_id: postId }).del()
 
       // 减少原有标签的使用次数
       for (const oldTag of oldTags) {
-        await pool.execute(
-          'UPDATE tags SET use_count = GREATEST(use_count - 1, 0) WHERE id = ?',
-          [oldTag.tag_id]
-        )
+        await db('tags').where({ id: oldTag.tag_id }).decrement('use_count', 1)
       }
 
       // 处理新标签
       if (tags && tags.length > 0) {
+        const db = getDB();
         for (const tag of tags) {
           let tagId
           let tagName
@@ -342,20 +349,14 @@ const postsCrudConfig = {
           if (typeof tag === 'string') {
             tagName = tag
             // 查找现有标签
-            const [existingTag] = await pool.execute(
-              'SELECT id FROM tags WHERE name = ?',
-              [tagName]
-            )
+            const existingTag = await db('tags').where({ name: tagName }).select('id')
 
             if (existingTag.length > 0) {
               tagId = existingTag[0].id
             } else {
               // 创建新标签
-              const [tagResult] = await pool.execute(
-                'INSERT INTO tags (name) VALUES (?)',
-                [tagName]
-              )
-              tagId = tagResult.insertId
+              const tagResult = await db('tags').insert({ name: tagName })
+              tagId = tagResult[0]
             }
           } else {
             // 处理对象格式的标签（向后兼容）
@@ -364,34 +365,25 @@ const postsCrudConfig = {
 
             // 如果是新标签，先创建标签
             if (tag.is_new || String(tag.id).startsWith('temp_')) {
-              const [existingTag] = await pool.execute(
-                'SELECT id FROM tags WHERE name = ?',
-                [tag.name]
-              )
+              const existingTag = await db('tags').where({ name: tag.name }).select('id')
 
               if (existingTag.length > 0) {
                 tagId = existingTag[0].id
               } else {
-                const [tagResult] = await pool.execute(
-                  'INSERT INTO tags (name) VALUES (?)',
-                  [tag.name]
-                )
-                tagId = tagResult.insertId
+                const tagResult = await db('tags').insert({ name: tag.name })
+                tagId = tagResult[0]
               }
             }
           }
 
           // 关联笔记和标签
-          await pool.execute(
-            'INSERT INTO post_tags (post_id, tag_id) VALUES (?, ?)',
-            [String(postId), String(tagId)]
-          )
+          await db('post_tags').insert({
+            post_id: String(postId),
+            tag_id: String(tagId)
+          })
 
           // 更新标签使用次数
-          await pool.execute(
-            'UPDATE tags SET use_count = use_count + 1 WHERE id = ?',
-            [String(tagId)]
-          )
+          await db('tags').where({ id: String(tagId) }).increment('use_count', 1)
         }
       }
     }
@@ -400,14 +392,12 @@ const postsCrudConfig = {
   // 删除前的处理（减少标签使用次数）
   beforeDelete: async (id) => {
     // 获取笔记关联的标签，减少标签使用次数
-    const [tagResult] = await pool.execute(
-      'SELECT tag_id FROM post_tags WHERE post_id = ?',
-      [String(id)]
-    )
+    const db = getDB();
+    const tagResult = await db('post_tags').where({ post_id: String(id) }).select('tag_id')
 
     // 减少标签使用次数
     for (const tag of tagResult) {
-      await pool.execute('UPDATE tags SET use_count = use_count - 1 WHERE id = ?', [String(tag.tag_id)])
+      await db('tags').where({ id: String(tag.tag_id) }).decrement('use_count', 1)
     }
     // 返回验证结果
     return { isValid: true }
@@ -415,17 +405,13 @@ const postsCrudConfig = {
 
   // 批量删除前的处理
   beforeDeleteMany: async (ids) => {
-    const placeholders = ids.map(() => '?').join(',')
-
     // 获取所有笔记关联的标签，减少标签使用次数
-    const [tagResult] = await pool.execute(
-      `SELECT tag_id FROM post_tags WHERE post_id IN (${placeholders})`,
-      ids.map(id => String(id))
-    )
+    const db = getDB();
+    const tagResult = await db('post_tags').whereIn('post_id', ids.map(id => String(id))).select('tag_id')
 
     // 减少标签使用次数
     for (const tag of tagResult) {
-      await pool.execute('UPDATE tags SET use_count = use_count - 1 WHERE id = ?', [String(tag.tag_id)])
+      await db('tags').where({ id: String(tag.tag_id) }).decrement('use_count', 1)
     }
   },
 
@@ -433,18 +419,19 @@ const postsCrudConfig = {
   customQueries: {
     getOne: async (req) => {
       const postId = req.params.id
+      const db = getDB();
 
       // 获取笔记基本信息
-      const [postResult] = await pool.execute(`
-        SELECT p.id, p.user_id, p.title, p.content, p.type, p.category_id, c.name as category,
-               p.view_count, p.like_count, p.collect_count, p.comment_count,
-               p.status, p.created_at,
-               u.nickname, COALESCE(u.user_id, CONCAT('user', LPAD(u.id, 3, '0'))) as user_display_id
-        FROM posts p
-        LEFT JOIN users u ON p.user_id = u.id
-        LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.id = ?
-      `, [String(postId)])
+      const postResult = await db({ p: 'posts' })
+        .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+        .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+        .where({ 'p.id': String(postId) })
+        .select(
+          'p.id', 'p.user_id', 'p.title', 'p.content', 'p.type', 'p.category_id',
+          'c.name as category', 'p.view_count', 'p.like_count', 'p.collect_count',
+          'p.comment_count', 'p.status', 'p.created_at', 'u.nickname',
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+        )
 
       if (postResult.length === 0) {
         return null
@@ -455,7 +442,7 @@ const postsCrudConfig = {
       // 根据笔记类型获取媒体信息
       if (post.type === 2) {
         // 视频笔记：获取视频信息
-        const [videos] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [String(postId)])
+        const videos = await db('post_videos').where({ post_id: String(postId) }).select('video_url', 'cover_url')
         if (videos.length > 0) {
           post.video_url = videos[0].video_url
           post.cover_url = videos[0].cover_url
@@ -465,17 +452,15 @@ const postsCrudConfig = {
         }
       } else {
         // 图文笔记：获取图片信息
-        const [images] = await pool.execute('SELECT image_url FROM post_images WHERE post_id = ?', [String(postId)])
+        const images = await db('post_images').where({ post_id: String(postId) }).select('image_url')
         post.images = images.map(img => img.image_url)
       }
 
       // 获取笔记标签
-      const [tags] = await pool.execute(`
-        SELECT t.id, t.name 
-        FROM tags t 
-        INNER JOIN post_tags pt ON t.id = pt.tag_id 
-        WHERE pt.post_id = ?
-      `, [String(postId)])
+      const tags = await db({ t: 'tags' })
+        .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+        .where({ 'pt.post_id': String(postId) })
+        .select('t.id', 't.name')
       post.tags = tags
 
       return post
@@ -485,50 +470,71 @@ const postsCrudConfig = {
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
+      const db = getDB();
+
+      // 构建基础查询
+      let query = db({ p: 'posts' })
+        .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+        .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+        .select(
+          'p.id', 'p.user_id', 'p.title', 'p.content', 'p.type', 'p.category_id',
+          'c.name as category', 'p.view_count', 'p.like_count', 'p.collect_count',
+          'p.comment_count', 'p.status', 'p.created_at', 'u.nickname',
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+        )
 
       // 搜索条件
-      let whereClause = ''
-      const params = []
-
       if (req.query.title) {
-        whereClause += ' WHERE p.title LIKE ?'
-        params.push(`%${req.query.title}%`)
+        query = query.where('p.title', 'like', `%${req.query.title}%`)
       }
 
       if (req.query.user_display_id) {
-        whereClause += whereClause ? ' AND u.user_id LIKE ?' : ' WHERE u.user_id LIKE ?'
-        params.push(`%${req.query.user_display_id}%`)
+        query = query.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
       }
 
       if (req.query.category_id) {
         if (req.query.category_id === 'null') {
-          whereClause += whereClause ? ' AND p.category_id IS NULL' : ' WHERE p.category_id IS NULL'
+          query = query.whereNull('p.category_id')
         } else {
-          whereClause += whereClause ? ' AND p.category_id = ?' : ' WHERE p.category_id = ?'
-          params.push(req.query.category_id)
+          query = query.where({ 'p.category_id': req.query.category_id })
         }
       }
 
       if (req.query.type !== undefined && req.query.type !== '') {
-        whereClause += whereClause ? ' AND p.type = ?' : ' WHERE p.type = ?'
-        params.push(req.query.type)
+        query = query.where({ 'p.type': req.query.type })
       }
 
       if (req.query.status !== undefined && req.query.status !== '') {
-        whereClause += whereClause ? ' AND p.status = ?' : ' WHERE p.status = ?'
-        params.push(req.query.status)
+        query = query.where({ 'p.status': req.query.status })
       }
 
       // 获取总数
-      const countQuery = `
-        SELECT COUNT(*) as total 
-        FROM posts p 
-        LEFT JOIN users u ON p.user_id = u.id
-        LEFT JOIN categories c ON p.category_id = c.id
-        ${whereClause}
-      `
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      const countQuery = db({ p: 'posts' })
+        .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+        .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+
+      if (req.query.title) {
+        countQuery.where('p.title', 'like', `%${req.query.title}%`)
+      }
+      if (req.query.user_display_id) {
+        countQuery.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
+      }
+      if (req.query.category_id) {
+        if (req.query.category_id === 'null') {
+          countQuery.whereNull('p.category_id')
+        } else {
+          countQuery.where({ 'p.category_id': req.query.category_id })
+        }
+      }
+      if (req.query.type !== undefined && req.query.type !== '') {
+        countQuery.where({ 'p.type': req.query.type })
+      }
+      if (req.query.status !== undefined && req.query.status !== '') {
+        countQuery.where({ 'p.status': req.query.status })
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理 - 使用对象映射
       const allowedSortFields = {
@@ -543,35 +549,22 @@ const postsCrudConfig = {
       }
 
       const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
+        'asc': 'asc',
+        'desc': 'desc'
       }
 
       const validSortField = allowedSortFields[req.query.sortField] || 'p.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT p.id, p.user_id, p.title, p.content, p.type, p.category_id, c.name as category,
-               p.view_count, p.like_count, p.collect_count, p.comment_count,
-               p.status, p.created_at,
-               u.nickname, COALESCE(u.user_id, CONCAT('user', LPAD(u.id, 3, '0'))) as user_display_id
-        FROM posts p
-        LEFT JOIN users u ON p.user_id = u.id
-        LEFT JOIN categories c ON p.category_id = c.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [posts] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const posts = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       // 为每个笔记批量获取图片信息和标签信息
       if (posts.length > 0) {
         const postIds = posts.map(p => p.id)
 
         // 批量获取图片
-        const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds])
+        const images = await db('post_images').whereIn('post_id', postIds).select('post_id', 'image_url')
         const imageMap = {}
         images.forEach(img => {
           if (!imageMap[img.post_id]) imageMap[img.post_id] = []
@@ -579,12 +572,10 @@ const postsCrudConfig = {
         })
 
         // 批量获取标签
-        const [tags] = await pool.query(`
-          SELECT pt.post_id, t.id, t.name 
-          FROM tags t 
-          INNER JOIN post_tags pt ON t.id = pt.tag_id 
-          WHERE pt.post_id IN (?)
-        `, [postIds])
+        const tags = await db({ t: 'tags' })
+          .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+          .whereIn('pt.post_id', postIds)
+          .select('pt.post_id', 't.id', 't.name')
         const tagMap = {}
         tags.forEach(t => {
           if (!tagMap[t.post_id]) tagMap[t.post_id] = []
@@ -646,15 +637,33 @@ router.get('/posts-audit', adminAuth, requirePermission('post_audit:view'), asyn
     }
 
     // 获取总数
-    const countQuery = `
-      SELECT COUNT(*) as total 
-      FROM posts p 
-      LEFT JOIN users u ON p.user_id = u.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      ${whereClause}
-    `
-    const [countResult] = await pool.execute(countQuery, params)
-    const total = countResult[0].total
+    const db = getDB();
+    let countQuery = db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+      .where({ 'p.status': 2 });
+
+    if (req.query.keyword) {
+      countQuery.where(function() {
+        this.where('p.title', 'like', `%${req.query.keyword}%`)
+            .orWhere('p.content', 'like', `%${req.query.keyword}%`);
+      });
+    }
+
+    if (req.query.user_display_id) {
+      countQuery.where('u.user_id', 'like', `%${req.query.user_display_id}%`);
+    }
+
+    if (req.query.category_id) {
+      if (req.query.category_id === 'null') {
+        countQuery.whereNull('p.category_id');
+      } else {
+        countQuery.where({ 'p.category_id': req.query.category_id });
+      }
+    }
+
+    const countResult = await countQuery.count('* as total').first();
+    const total = parseInt(countResult.total);
 
     // 排序处理
     const allowedSortFields = {
@@ -678,26 +687,44 @@ router.get('/posts-audit', adminAuth, requirePermission('post_audit:view'), asyn
     const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
 
     // 获取数据
-    const dataQuery = `
-      SELECT p.id, p.user_id, p.title, p.content, p.type, p.category_id, c.name as category,
-             p.view_count, p.like_count, p.collect_count, p.comment_count,
-             p.status, p.created_at,
-             u.nickname, COALESCE(u.user_id, CONCAT('user', LPAD(u.id, 3, '0'))) as user_display_id
-      FROM posts p
-      LEFT JOIN users u ON p.user_id = u.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      ${whereClause}
-      ${orderClause}
-      LIMIT ? OFFSET ?
-    `
-    const [posts] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+    let dataQuery = db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
+      .where({ 'p.status': 2 })
+      .select(
+        'p.id', 'p.user_id', 'p.title', 'p.content', 'p.type', 'p.category_id',
+        'c.name as category', 'p.view_count', 'p.like_count', 'p.collect_count',
+        'p.comment_count', 'p.status', 'p.created_at', 'u.nickname',
+        db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+      );
+
+    if (req.query.keyword) {
+      dataQuery.where(function() {
+        this.where('p.title', 'like', `%${req.query.keyword}%`)
+            .orWhere('p.content', 'like', `%${req.query.keyword}%`);
+      });
+    }
+
+    if (req.query.user_display_id) {
+      dataQuery.where('u.user_id', 'like', `%${req.query.user_display_id}%`);
+    }
+
+    if (req.query.category_id) {
+      if (req.query.category_id === 'null') {
+        dataQuery.whereNull('p.category_id');
+      } else {
+        dataQuery.where({ 'p.category_id': req.query.category_id });
+      }
+    }
+
+    const posts = await dataQuery.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset);
 
     // 为每个笔记批量获取图片信息和标签信息
     if (posts.length > 0) {
       const postIds = posts.map(p => p.id)
 
       // 批量获取图片
-      const [images] = await pool.query('SELECT post_id, image_url FROM post_images WHERE post_id IN (?)', [postIds])
+      const images = await db('post_images').whereIn('post_id', postIds).select('post_id', 'image_url')
       const imageMap = {}
       images.forEach(img => {
         if (!imageMap[img.post_id]) imageMap[img.post_id] = []
@@ -705,12 +732,10 @@ router.get('/posts-audit', adminAuth, requirePermission('post_audit:view'), asyn
       })
 
       // 批量获取标签
-      const [tags] = await pool.query(`
-        SELECT pt.post_id, t.id, t.name 
-        FROM tags t 
-        INNER JOIN post_tags pt ON t.id = pt.tag_id 
-        WHERE pt.post_id IN (?)
-      `, [postIds])
+      const tags = await db({ t: 'tags' })
+        .join({ pt: 'post_tags' }, 't.id', 'pt.tag_id')
+        .whereIn('pt.post_id', postIds)
+        .select('pt.post_id', 't.id', 't.name')
       const tagMap = {}
       tags.forEach(t => {
         if (!tagMap[t.post_id]) tagMap[t.post_id] = []
@@ -753,7 +778,8 @@ router.put('/posts-audit/:id/approve', adminAuth, requirePermission('post_audit:
     const adminId = req.user.adminId
 
     // 检查笔记是否存在
-    const [postResult] = await pool.execute('SELECT id FROM posts WHERE id = ?', [String(postId)])
+    const db = getDB();
+    const postResult = await db('posts').where({ id: String(postId) }).select('id')
     if (postResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
@@ -762,10 +788,10 @@ router.put('/posts-audit/:id/approve', adminAuth, requirePermission('post_audit:
     }
 
     // 更新笔记状态为已发布
-    await pool.execute('UPDATE posts SET status = 0 WHERE id = ?', [String(postId)])
+    await db('posts').where({ id: String(postId) }).update({ status: 0 })
 
     // 检查笔记内容是否包含@用户，如果有，发送艾特通知
-    const [postContentResult] = await pool.execute('SELECT user_id, content FROM posts WHERE id = ?', [String(postId)])
+    const postContentResult = await db('posts').where({ id: String(postId) }).select('user_id', 'content')
     if (postContentResult.length > 0) {
       const { user_id: userId, content } = postContentResult[0]
 
@@ -776,7 +802,7 @@ router.put('/posts-audit/:id/approve', adminAuth, requirePermission('post_audit:
         for (const mentionedUser of mentionedUsers) {
           try {
             // 根据悦社号查找用户的自增ID
-            const [userRows] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [mentionedUser.userId])
+            const userRows = await db('users').where({ user_id: mentionedUser.userId }).select('id')
 
             if (userRows.length > 0) {
               const mentionedUserId = userRows[0].id
@@ -791,7 +817,7 @@ router.put('/posts-audit/:id/approve', adminAuth, requirePermission('post_audit:
                   targetId: postId
                 })
 
-                await NotificationHelper.insertNotification(pool, mentionNotificationData)
+                await NotificationHelper.insertNotification(db, mentionNotificationData)
               }
             }
           } catch (error) {
@@ -802,10 +828,11 @@ router.put('/posts-audit/:id/approve', adminAuth, requirePermission('post_audit:
     }
 
     // 更新audit表中的审核记录
-    await pool.execute(
-      'UPDATE audit SET status = 1, audit_time = NOW(), admin_id = ? WHERE type = 3 AND target_id = ?',
-      [adminId, String(postId)]
-    )
+    await db('audit').where({ type: 3, target_id: String(postId) }).update({ 
+      status: 1, 
+      audit_time: db.fn.now(), 
+      admin_id: adminId 
+    })
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -827,7 +854,8 @@ router.put('/posts-audit/:id/reject', adminAuth, requirePermission('post_audit:a
     const adminId = req.user.adminId
 
     // 检查笔记是否存在
-    const [postResult] = await pool.execute('SELECT id FROM posts WHERE id = ?', [String(postId)])
+    const db = getDB();
+    const postResult = await db('posts').where({ id: String(postId) }).select('id')
     if (postResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
@@ -836,13 +864,14 @@ router.put('/posts-audit/:id/reject', adminAuth, requirePermission('post_audit:a
     }
 
     // 未过审时设置为未过审状态
-    await pool.execute('UPDATE posts SET status = 3 WHERE id = ?', [String(postId)])
+    await db('posts').where({ id: String(postId) }).update({ status: 3 })
 
     // 更新audit表中的审核记录
-    await pool.execute(
-      'UPDATE audit SET status = 2, audit_time = NOW(), admin_id = ? WHERE type = 3 AND target_id = ?',
-      [adminId, String(postId)]
-    )
+    await db('audit').where({ type: 3, target_id: String(postId) }).update({ 
+      status: 2, 
+      audit_time: db.fn.now(), 
+      admin_id: adminId 
+    })
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -926,22 +955,23 @@ const commentsCrudConfig = {
   // 自定义验证
   beforeCreate: async (data) => {
     const { user_id, post_id, parent_id } = data
+    const db = getDB();
 
     // 检查用户是否存在
-    const [userResult] = await pool.execute('SELECT id FROM users WHERE id = ?', [String(user_id)])
+    const userResult = await db('users').where({ id: String(user_id) }).select('id')
     if (userResult.length === 0) {
       return { isValid: false, message: '用户不存在' }
     }
 
     // 检查笔记是否存在
-    const [postResult] = await pool.execute('SELECT id FROM posts WHERE id = ?', [String(post_id)])
+    const postResult = await db('posts').where({ id: String(post_id) }).select('id')
     if (postResult.length === 0) {
       return { isValid: false, message: '笔记不存在' }
     }
 
     // 如果是回复评论，检查父评论是否存在
     if (parent_id) {
-      const [parentResult] = await pool.execute('SELECT id FROM comments WHERE id = ?', [String(parent_id)])
+      const parentResult = await db('comments').where({ id: String(parent_id) }).select('id')
       if (parentResult.length === 0) {
         return { isValid: false, message: '父评论不存在' }
       }
@@ -956,36 +986,49 @@ const commentsCrudConfig = {
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
+      const db = getDB();
+
+      // 构建基础查询
+      let query = db({ c: 'comments' })
+        .leftJoin({ u: 'users' }, 'c.user_id', 'u.id')
+        .leftJoin({ p: 'posts' }, 'c.post_id', 'p.id')
+        .select(
+          'c.id', 'c.content', 'c.parent_id', 'c.like_count', 'c.created_at',
+          'c.user_id', 'u.nickname',
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id"),
+          'p.id as post_id', 'p.title as post_title'
+        )
 
       // 搜索条件
-      let whereClause = ''
-      const params = []
-
       if (req.query.post_id) {
-        whereClause += ' WHERE c.post_id = ?'
-        params.push(req.query.post_id)
+        query = query.where({ 'c.post_id': req.query.post_id })
       }
 
       if (req.query.user_display_id) {
-        whereClause += whereClause ? ' AND u.user_id LIKE ?' : ' WHERE u.user_id LIKE ?'
-        params.push(`%${req.query.user_display_id}%`)
+        query = query.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
       }
 
       if (req.query.content) {
-        whereClause += whereClause ? ' AND c.content LIKE ?' : ' WHERE c.content LIKE ?'
-        params.push(`%${req.query.content}%`)
+        query = query.where('c.content', 'like', `%${req.query.content}%`)
       }
 
       // 获取总数
-      const countQuery = `
-        SELECT COUNT(*) as total 
-        FROM comments c 
-        LEFT JOIN users u ON c.user_id = u.id
-        LEFT JOIN posts p ON c.post_id = p.id
-        ${whereClause}
-      `
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ c: 'comments' })
+        .leftJoin({ u: 'users' }, 'c.user_id', 'u.id')
+        .leftJoin({ p: 'posts' }, 'c.post_id', 'p.id')
+
+      if (req.query.post_id) {
+        countQuery = countQuery.where({ 'c.post_id': req.query.post_id })
+      }
+      if (req.query.user_display_id) {
+        countQuery = countQuery.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
+      }
+      if (req.query.content) {
+        countQuery = countQuery.where('c.content', 'like', `%${req.query.content}%`)
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理 - 使用对象映射
       const allowedSortFields = {
@@ -997,28 +1040,15 @@ const commentsCrudConfig = {
       }
 
       const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
+        'asc': 'asc',
+        'desc': 'desc'
       }
 
       const validSortField = allowedSortFields[req.query.sortField] || 'c.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT c.id, c.content, c.parent_id, c.like_count, c.created_at,
-               c.user_id, u.nickname, 
-               COALESCE(u.user_id, CONCAT('user', LPAD(u.id, 3, '0'))) as user_display_id,
-               p.id as post_id, p.title as post_title
-        FROM comments c
-        LEFT JOIN users u ON c.user_id = u.id
-        LEFT JOIN posts p ON c.post_id = p.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [comments] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const comments = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       return {
         data: comments,
@@ -1133,30 +1163,45 @@ const likesCrudConfig = {
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
+      const db = getDB();
+
+      // 构建基础查询
+      let query = db({ l: 'likes' })
+        .leftJoin({ u: 'users' }, 'l.user_id', 'u.id')
+        .select(
+          'l.id', 'l.user_id', 'l.target_type', 'l.target_id', 'l.created_at',
+          'u.nickname',
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+        )
 
       // 搜索条件
-      let whereClause = ''
-      const params = []
-
       if (req.query.user_display_id) {
-        whereClause += whereClause ? ' AND u.user_id LIKE ?' : 'WHERE u.user_id LIKE ?'
-        params.push(`%${req.query.user_display_id}%`)
+        query = query.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
       }
 
       if (req.query.target_type) {
-        whereClause += whereClause ? ' AND l.target_type = ?' : 'WHERE l.target_type = ?'
-        params.push(req.query.target_type)
+        query = query.where({ 'l.target_type': req.query.target_type })
       }
 
       if (req.query.target_id) {
-        whereClause += whereClause ? ' AND l.target_id = ?' : 'WHERE l.target_id = ?'
-        params.push(req.query.target_id)
+        query = query.where({ 'l.target_id': req.query.target_id })
       }
 
       // 获取总数
-      const countQuery = `SELECT COUNT(*) as total FROM likes l LEFT JOIN users u ON l.user_id = u.id ${whereClause}`
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ l: 'likes' }).leftJoin({ u: 'users' }, 'l.user_id', 'u.id')
+
+      if (req.query.user_display_id) {
+        countQuery = countQuery.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
+      }
+      if (req.query.target_type) {
+        countQuery = countQuery.where({ 'l.target_type': req.query.target_type })
+      }
+      if (req.query.target_id) {
+        countQuery = countQuery.where({ 'l.target_id': req.query.target_id })
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理 - 使用对象映射
       const allowedSortFields = {
@@ -1166,26 +1211,15 @@ const likesCrudConfig = {
       }
 
       const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
+        'asc': 'asc',
+        'desc': 'desc'
       }
 
       const validSortField = allowedSortFields[req.query.sortField] || 'l.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT l.id, l.user_id, l.target_type, l.target_id, l.created_at,
-               u.nickname, 
-               COALESCE(u.user_id, CONCAT('user', LPAD(u.id, 3, '0'))) as user_display_id
-        FROM likes l
-        LEFT JOIN users u ON l.user_id = u.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [likes] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const likes = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       return {
         data: likes,
@@ -1263,11 +1297,13 @@ const collectionsCrudConfig = {
     }
 
     // 检查是否已经收藏
-    const { pool } = require('../config/config')
-    const [existing] = await pool.execute(
-      'SELECT id FROM collections WHERE user_id = ? AND post_id = ?',
-      [String(data.user_id), String(data.post_id)]
-    )
+    const db = getDB();
+    const existing = await db('collections')
+      .where({ 
+        user_id: String(data.user_id), 
+        post_id: String(data.post_id) 
+      })
+      .select('id')
     if (existing.length > 0) {
       return {
         isValid: false,
@@ -1298,25 +1334,40 @@ const collectionsCrudConfig = {
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
+      const db = getDB();
+
+      // 构建基础查询
+      let query = db({ c: 'collections' })
+        .leftJoin({ u: 'users' }, 'c.user_id', 'u.id')
+        .leftJoin({ p: 'posts' }, 'c.post_id', 'p.id')
+        .select(
+          'c.id', 'c.user_id', 'c.post_id', 'c.created_at',
+          'u.nickname',
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id"),
+          'p.title as post_title'
+        )
 
       // 搜索条件
-      let whereClause = ''
-      const params = []
-
       if (req.query.user_display_id) {
-        whereClause += whereClause ? ' AND u.user_id LIKE ?' : 'WHERE u.user_id LIKE ?'
-        params.push(`%${req.query.user_display_id}%`)
+        query = query.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
       }
 
       if (req.query.post_id) {
-        whereClause += whereClause ? ' AND c.post_id = ?' : 'WHERE c.post_id = ?'
-        params.push(req.query.post_id)
+        query = query.where({ 'c.post_id': req.query.post_id })
       }
 
       // 获取总数
-      const countQuery = `SELECT COUNT(*) as total FROM collections c LEFT JOIN users u ON c.user_id = u.id ${whereClause}`
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ c: 'collections' }).leftJoin({ u: 'users' }, 'c.user_id', 'u.id')
+
+      if (req.query.user_display_id) {
+        countQuery = countQuery.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
+      }
+      if (req.query.post_id) {
+        countQuery = countQuery.where({ 'c.post_id': req.query.post_id })
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理 - 使用对象映射
       const allowedSortFields = {
@@ -1326,28 +1377,15 @@ const collectionsCrudConfig = {
       }
 
       const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
+        'asc': 'asc',
+        'desc': 'desc'
       }
 
       const validSortField = allowedSortFields[req.query.sortField] || 'c.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT c.id, c.user_id, c.post_id, c.created_at,
-               u.nickname, 
-               COALESCE(u.user_id, CONCAT('user', LPAD(u.id, 3, '0'))) as user_display_id,
-               p.title as post_title
-        FROM collections c
-        LEFT JOIN users u ON c.user_id = u.id
-        LEFT JOIN posts p ON c.post_id = p.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [collections] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const collections = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       return {
         data: collections,
@@ -1409,11 +1447,13 @@ const followsCrudConfig = {
     await validateFollowData(data)
 
     // 检查是否已经关注
-    const { pool } = require('../config/config')
-    const [existing] = await pool.execute(
-      'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
-      [String(data.follower_id), String(data.following_id)]
-    )
+    const db = getDB();
+    const existing = await db('follows')
+      .where({ 
+        follower_id: String(data.follower_id), 
+        following_id: String(data.following_id) 
+      })
+      .select('id')
     if (existing.length > 0) {
       return {
         isValid: false,
@@ -1428,8 +1468,8 @@ const followsCrudConfig = {
   beforeUpdate: async (data, id) => {
     if (data.following_id) {
       // 获取当前记录的关注者ID
-      const { pool } = require('../config/config')
-      const [current] = await pool.execute('SELECT follower_id FROM follows WHERE id = ?', [String(id)])
+      const db = getDB();
+      const current = await db('follows').where({ id: String(id) }).select('follower_id')
       if (current.length === 0) {
         return {
           isValid: false,
@@ -1454,57 +1494,75 @@ const followsCrudConfig = {
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
+      const db = getDB();
+
+      // 构建基础查询
+      let query = db({ f: 'follows' })
+        .leftJoin({ u1: 'users' }, 'f.follower_id', 'u1.id')
+        .leftJoin({ u2: 'users' }, 'f.following_id', 'u2.id')
+        .select(
+          'f.id', 'f.follower_id', 'f.following_id', 'f.created_at',
+          'u1.nickname as follower_nickname',
+          db.raw("COALESCE(u1.user_id, CONCAT('user', LPAD(u1.id::text, 3, '0'))) as follower_display_id"),
+          'u2.nickname as following_nickname',
+          db.raw("COALESCE(u2.user_id, CONCAT('user', LPAD(u2.id::text, 3, '0'))) as following_display_id")
+        )
 
       // 搜索条件
-      let whereClause = ''
-      const params = []
-
       if (req.query.follower_display_id) {
         // 根据关注者悦社号查找用户ID
-        const userQuery = 'SELECT id FROM users WHERE COALESCE(user_id, CONCAT(\'user\', LPAD(id, 3, \'0\'))) = ?'
-        const [userResult] = await pool.execute(userQuery, [req.query.follower_display_id])
+        const userResult = await db("users")
+          .whereRaw("COALESCE(user_id, CONCAT('user', LPAD(id, 3, '0'))) = ?", [req.query.follower_display_id])
+          .select('id')
+
         if (userResult.length > 0) {
-          whereClause += whereClause ? ' AND f.follower_id = ?' : 'WHERE f.follower_id = ?'
-          params.push(userResult[0].id)
+          query = query.where({ 'f.follower_id': userResult[0].id })
         } else {
-          // 如果找不到用户，返回空结果
           return {
             data: [],
-            pagination: {
-              page: parseInt(req.query.page) || 1,
-              limit: parseInt(req.query.limit) || 20,
-              total: 0,
-              pages: 0
-            }
+            pagination: { page: parseInt(req.query.page) || 1, limit: parseInt(req.query.limit) || 20, total: 0, pages: 0 }
           }
         }
       }
 
       if (req.query.following_display_id) {
-        // 根据被关注者悦社号查找用户ID
-        const userQuery = 'SELECT id FROM users WHERE COALESCE(user_id, CONCAT(\'user\', LPAD(id, 3, \'0\'))) = ?'
-        const [userResult] = await pool.execute(userQuery, [req.query.following_display_id])
+        const userResult = await db("users")
+          .whereRaw("COALESCE(user_id, CONCAT('user', LPAD(id, 3, '0'))) = ?", [req.query.following_display_id])
+          .select('id')
+
         if (userResult.length > 0) {
-          whereClause += whereClause ? ' AND f.following_id = ?' : 'WHERE f.following_id = ?'
-          params.push(userResult[0].id)
+          query = query.where({ 'f.following_id': userResult[0].id })
         } else {
-          // 如果找不到用户，返回空结果
           return {
             data: [],
-            pagination: {
-              page: parseInt(req.query.page) || 1,
-              limit: parseInt(req.query.limit) || 20,
-              total: 0,
-              pages: 0
-            }
+            pagination: { page: parseInt(req.query.page) || 1, limit: parseInt(req.query.limit) || 20, total: 0, pages: 0 }
           }
         }
       }
 
       // 获取总数
-      const countQuery = `SELECT COUNT(*) as total FROM follows f ${whereClause}`
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ f: 'follows' })
+
+      if (req.query.follower_display_id) {
+        const userResult = await db("users")
+          .whereRaw("COALESCE(user_id, CONCAT('user', LPAD(id, 3, '0'))) = ?", [req.query.follower_display_id])
+          .select('id')
+        if (userResult.length > 0) {
+          countQuery = countQuery.where({ 'f.follower_id': userResult[0].id })
+        }
+      }
+
+      if (req.query.following_display_id) {
+        const userResult = await db("users")
+          .whereRaw("COALESCE(user_id, CONCAT('user', LPAD(id, 3, '0'))) = ?", [req.query.following_display_id])
+          .select('id')
+        if (userResult.length > 0) {
+          countQuery = countQuery.where({ 'f.following_id': userResult[0].id })
+        }
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理
       const allowedSortFields = {
@@ -1514,30 +1572,13 @@ const followsCrudConfig = {
         'created_at': 'f.created_at'
       }
 
-      const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
-      }
+      const allowedSortOrders = { 'asc': 'asc', 'desc': 'desc' }
 
       const validSortField = allowedSortFields[req.query.sortField] || 'f.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT f.id, f.follower_id, f.following_id, f.created_at,
-               u1.nickname as follower_nickname, 
-               COALESCE(u1.user_id, CONCAT('user', LPAD(u1.id, 3, '0'))) as follower_display_id,
-               u2.nickname as following_nickname, 
-               COALESCE(u2.user_id, CONCAT('user', LPAD(u2.id, 3, '0'))) as following_display_id
-        FROM follows f
-        LEFT JOIN users u1 ON f.follower_id = u1.id
-        LEFT JOIN users u2 ON f.following_id = u2.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [follows] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const follows = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       return {
         data: follows,
@@ -1598,70 +1639,63 @@ const notificationsCrudConfig = {
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
+      const db = getDB();
+
+      // 构建基础查询
+      let query = db({ n: 'notifications' })
+        .leftJoin({ u1: 'users' }, 'n.user_id', 'u1.id')
+        .leftJoin({ u2: 'users' }, 'n.sender_id', 'u2.id')
+        .select(
+          'n.id', 'n.user_id', 'n.sender_id', 'n.type', 'n.title', 'n.target_id',
+          'n.comment_id', 'n.is_read', 'n.created_at',
+          'u1.nickname as user_nickname',
+          db.raw("COALESCE(u1.user_id, CONCAT('user', LPAD(u1.id::text, 3, '0'))) as user_display_id"),
+          'u2.nickname as sender_nickname',
+          db.raw("COALESCE(u2.user_id, CONCAT('user', LPAD(u2.id::text, 3, '0'))) as sender_display_id")
+        )
 
       // 搜索条件
-      let whereClause = ''
-      const params = []
-
       if (req.query.user_display_id) {
-        whereClause += whereClause ? ' AND u1.user_id LIKE ?' : 'WHERE u1.user_id LIKE ?'
-        params.push(`%${req.query.user_display_id}%`)
+        query = query.where('u1.user_id', 'like', `%${req.query.user_display_id}%`)
       }
 
       if (req.query.type) {
-        whereClause += whereClause ? ' AND n.type = ?' : 'WHERE n.type = ?'
-        params.push(req.query.type)
+        query = query.where({ 'n.type': req.query.type })
       }
 
       if (req.query.is_read !== undefined) {
-        whereClause += whereClause ? ' AND n.is_read = ?' : 'WHERE n.is_read = ?'
-        params.push(req.query.is_read)
+        query = query.where({ 'n.is_read': req.query.is_read })
       }
 
       // 获取总数
-      const countQuery = `SELECT COUNT(*) as total FROM notifications n LEFT JOIN users u1 ON n.user_id = u1.id ${whereClause}`
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ n: 'notifications' }).leftJoin({ u1: 'users' }, 'n.user_id', 'u1.id')
+
+      if (req.query.user_display_id) {
+        countQuery = countQuery.where('u1.user_id', 'like', `%${req.query.user_display_id}%`)
+      }
+      if (req.query.type) {
+        countQuery = countQuery.where({ 'n.type': req.query.type })
+      }
+      if (req.query.is_read !== undefined) {
+        countQuery = countQuery.where({ 'n.is_read': req.query.is_read })
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理 - 使用对象映射
-      const allowedSortFields = {
-        'id': 'n.id',
-        'created_at': 'n.created_at'
-      }
-
-      const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
-      }
+      const allowedSortFields = { 'id': 'n.id', 'created_at': 'n.created_at' }
+      const allowedSortOrders = { 'asc': 'asc', 'desc': 'desc' }
 
       const validSortField = allowedSortFields[req.query.sortField] || 'n.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT n.id, n.user_id, n.sender_id, n.type, n.title, n.target_id, n.comment_id, n.is_read, n.created_at,
-               u1.nickname as user_nickname, 
-               COALESCE(u1.user_id, CONCAT('user', LPAD(u1.id, 3, '0'))) as user_display_id,
-               u2.nickname as sender_nickname, 
-               COALESCE(u2.user_id, CONCAT('user', LPAD(u2.id, 3, '0'))) as sender_display_id
-        FROM notifications n
-        LEFT JOIN users u1 ON n.user_id = u1.id
-        LEFT JOIN users u2 ON n.sender_id = u2.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [notifications] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const notifications = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       return {
         data: notifications,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     }
   }
@@ -1726,31 +1760,42 @@ const sessionsCrudConfig = {
   // 自定义查询
   customQueries: {
     getList: async (req) => {
-      const { pool } = require('../config/config')
+      const db = getDB();
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
 
-      // 构建搜索条件
-      let whereClause = ''
-      const params = []
+      // 构建基础查询
+      let query = db({ s: 'user_sessions' })
+        .leftJoin({ u: 'users' }, 's.user_id', 'u.id')
+        .select(
+          's.id', 's.user_id', 's.refresh_token', 's.user_agent', 's.is_active',
+          's.expires_at', 's.created_at',
+          'u.nickname',
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+        )
 
+      // 搜索条件
       if (req.query.user_display_id) {
-        whereClause += whereClause ? ' AND u.user_id LIKE ?' : 'WHERE u.user_id LIKE ?'
-        params.push(`%${req.query.user_display_id}%`)
+        query = query.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
       }
 
       if (req.query.is_active !== undefined && req.query.is_active !== '') {
-        whereClause += whereClause ? ' AND s.is_active = ?' : 'WHERE s.is_active = ?'
-        params.push(req.query.is_active)
+        query = query.where({ 's.is_active': req.query.is_active })
       }
 
-
-
       // 获取总数
-      const countQuery = `SELECT COUNT(*) as total FROM user_sessions s LEFT JOIN users u ON s.user_id = u.id ${whereClause}`
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ s: 'user_sessions' }).leftJoin({ u: 'users' }, 's.user_id', 'u.id')
+
+      if (req.query.user_display_id) {
+        countQuery = countQuery.where('u.user_id', 'like', `%${req.query.user_display_id}%`)
+      }
+      if (req.query.is_active !== undefined && req.query.is_active !== '') {
+        countQuery = countQuery.where({ 's.is_active': req.query.is_active })
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理 - 使用对象映射
       const allowedSortFields = {
@@ -1760,36 +1805,17 @@ const sessionsCrudConfig = {
         'created_at': 's.created_at'
       }
 
-      const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
-      }
+      const allowedSortOrders = { 'asc': 'asc', 'desc': 'desc' }
 
       const validSortField = allowedSortFields[req.query.sortField] || 's.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT s.id, s.user_id, s.refresh_token, s.user_agent, s.is_active, s.expires_at, s.created_at,
-               u.nickname, 
-               COALESCE(u.user_id, CONCAT('user', LPAD(u.id, 3, '0'))) as user_display_id
-        FROM user_sessions s
-        LEFT JOIN users u ON s.user_id = u.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [sessions] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const sessions = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       return {
         data: sessions,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     }
   }
@@ -1836,29 +1862,41 @@ const adminSessionsCrudConfig = {
   // 自定义查询
   customQueries: {
     getList: async (req) => {
-      const { pool } = require('../config/config')
+      const db = getDB();
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
 
-      // 构建搜索条件
-      let whereClause = ''
-      const params = []
+      // 构建基础查询
+      let query = db({ s: 'admin_sessions' })
+        .leftJoin({ a: 'admin' }, 's.admin_id', 'a.id')
+        .select(
+          's.id', 's.admin_id', 's.refresh_token', 's.user_agent', 's.is_active',
+          's.expires_at', 's.created_at',
+          'a.username'
+        )
 
+      // 搜索条件
       if (req.query.username) {
-        whereClause += whereClause ? ' AND a.username LIKE ?' : 'WHERE a.username LIKE ?'
-        params.push(`%${req.query.username}%`)
+        query = query.where('a.username', 'like', `%${req.query.username}%`)
       }
 
       if (req.query.is_active !== undefined && req.query.is_active !== '') {
-        whereClause += whereClause ? ' AND s.is_active = ?' : 'WHERE s.is_active = ?'
-        params.push(req.query.is_active)
+        query = query.where({ 's.is_active': req.query.is_active })
       }
 
       // 获取总数
-      const countQuery = `SELECT COUNT(*) as total FROM admin_sessions s LEFT JOIN admin a ON s.admin_id = a.id ${whereClause}`
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ s: 'admin_sessions' }).leftJoin({ a: 'admin' }, 's.admin_id', 'a.id')
+
+      if (req.query.username) {
+        countQuery = countQuery.where('a.username', 'like', `%${req.query.username}%`)
+      }
+      if (req.query.is_active !== undefined && req.query.is_active !== '') {
+        countQuery = countQuery.where({ 's.is_active': req.query.is_active })
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理 - 使用对象映射
       const allowedSortFields = {
@@ -1868,35 +1906,17 @@ const adminSessionsCrudConfig = {
         'created_at': 's.created_at'
       }
 
-      const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
-      }
+      const allowedSortOrders = { 'asc': 'asc', 'desc': 'desc' }
 
       const validSortField = allowedSortFields[req.query.sortField] || 's.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据
-      const dataQuery = `
-        SELECT s.id, s.admin_id, s.refresh_token, s.user_agent, s.is_active, s.expires_at, s.created_at,
-               a.username
-        FROM admin_sessions s
-        LEFT JOIN admin a ON s.admin_id = a.id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [sessions] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const sessions = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       return {
         data: sessions,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) }
       }
     }
   }
@@ -1968,14 +1988,15 @@ const usersCrudConfig = {
 
     // 设置默认值
     // 如果没有提供密码，设置默认哈希密码（123456的SHA256哈希值）
+    const db = getDB();
     if (!data.password) {
       // 使用MySQL的SHA2函数生成默认密码的哈希值
-      const [result] = await pool.execute('SELECT SHA2(?, 256) as hashed_password', [String('123456')])
-      data.password = result[0].hashed_password
+      const result = await db.raw("SELECT SHA2(?, 256) as hashed_password", [String('123456')])
+      data.password = result.rows?.[0]?.hashed_password || result[0]?.hashed_password
     } else {
       // 如果提供了密码，进行哈希处理
-      const [result] = await pool.execute('SELECT SHA2(?, 256) as hashed_password', [String(data.password)])
-      data.password = result[0].hashed_password
+      const result = await db.raw("SELECT SHA2(?, 256) as hashed_password", [String(data.password)])
+      data.password = result.rows?.[0]?.hashed_password || result[0]?.hashed_password
     }
     data.avatar = data.avatar || ''
     data.bio = data.bio || ''
@@ -2005,60 +2026,76 @@ const usersCrudConfig = {
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
       const offset = (page - 1) * limit
+      const db = getDB();
+
+      // 构建基础查询 - 使用子查询获取最新封禁记录
+      const banSubquery = db('user_ban')
+        .whereIn('id', function() {
+          this.select(db.raw('MAX(id)'))
+            .from('user_ban')
+            .where('status', 0)
+            .orWhere('status', 3)
+            .groupBy('user_id');
+        })
+        .select('user_id', 'status', 'reason', 'end_time', 'created_at')
+        .as('ub');
+
+      let query = db({ u: 'users' }).leftJoin(banSubquery, 'u.id', 'ub.user_id').select(
+        'u.*',
+        db.raw("COALESCE(ub.status, -1) as ban_status"),
+        'ub.reason as ban_reason',
+        'ub.end_time as ban_end_time',
+        'ub.created_at as ban_created_at'
+      );
 
       // 搜索条件
-      let whereClause = ''
-      const params = []
-
       if (req.query.user_id) {
-        whereClause += ' WHERE u.user_id LIKE ?'
-        params.push(`%${req.query.user_id}%`)
+        query = query.where('u.user_id', 'like', `%${req.query.user_id}%`)
       }
 
       if (req.query.nickname) {
-        whereClause += whereClause ? ' AND u.nickname LIKE ?' : ' WHERE u.nickname LIKE ?'
-        params.push(`%${req.query.nickname}%`)
+        query = query.where('u.nickname', 'like', `%${req.query.nickname}%`)
       }
 
       if (req.query.location) {
-        whereClause += whereClause ? ' AND u.location LIKE ?' : ' WHERE u.location LIKE ?'
-        params.push(`%${req.query.location}%`)
+        query = query.where('u.location', 'like', `%${req.query.location}%`)
       }
 
       if (req.query.is_active !== undefined && req.query.is_active !== '') {
-        whereClause += whereClause ? ' AND u.is_active = ?' : ' WHERE u.is_active = ?'
-        params.push(req.query.is_active)
+        query = query.where({ 'u.is_active': req.query.is_active })
       }
 
       if (req.query.ban_status !== undefined && req.query.ban_status !== '') {
-        const banStatus = req.query.ban_status
-        if (banStatus === 'normal') {
-          // 正常状态：没有活跃的封禁记录
-          whereClause += whereClause ? ' AND ub.user_id IS NULL' : ' WHERE ub.user_id IS NULL'
-        } else if (banStatus === 'banned') {
-          // 封禁状态：有活跃的封禁记录
-          whereClause += whereClause ? ' AND ub.user_id IS NOT NULL' : ' WHERE ub.user_id IS NOT NULL'
+        if (req.query.ban_status === 'normal') {
+          query = query.whereNull('ub.user_id')
+        } else if (req.query.ban_status === 'banned') {
+          query = query.whereNotNull('ub.user_id')
         }
       }
 
       // 获取总数（使用子查询确保计数准确）
-      const countQuery = `
-        SELECT COUNT(*) as total 
-        FROM users u
-        LEFT JOIN (
-          SELECT user_id
-          FROM user_ban
-          WHERE id IN (
-            SELECT MAX(id)
-            FROM user_ban
-            WHERE status IN (0, 3)
-            GROUP BY user_id
-          )
-        ) ub ON u.id = ub.user_id
-        ${whereClause}
-      `
-      const [countResult] = await pool.execute(countQuery, params)
-      const total = countResult[0].total
+      let countQuery = db({ u: 'users' }).leftJoin(banSubquery, 'u.id', 'ub.user_id');
+
+      if (req.query.user_id) {
+        countQuery = countQuery.where('u.user_id', 'like', `%${req.query.user_id}%`)
+      }
+      if (req.query.nickname) {
+        countQuery = countQuery.where('u.nickname', 'like', `%${req.query.nickname}%`)
+      }
+      if (req.query.location) {
+        countQuery = countQuery.where('u.location', 'like', `%${req.query.location}%`)
+      }
+      if (req.query.is_active !== undefined && req.query.is_active !== '') {
+        countQuery = countQuery.where({ 'u.is_active': req.query.is_active })
+      }
+      if (req.query.ban_status === 'normal') {
+        countQuery = countQuery.whereNull('ub.user_id')
+      } else if (req.query.ban_status === 'banned') {
+        countQuery = countQuery.whereNotNull('ub.user_id')
+      }
+
+      const countResult = await countQuery.count('* as total').first()
+      const total = parseInt(countResult.total)
 
       // 排序处理
       const allowedSortFields = {
@@ -2069,39 +2106,13 @@ const usersCrudConfig = {
         'like_count': 'u.like_count',
         'created_at': 'u.created_at'
       }
-
-      const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
-      }
+      const allowedSortOrders = { 'asc': 'asc', 'desc': 'desc' }
 
       const validSortField = allowedSortFields[req.query.sortField] || 'u.created_at'
-      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-      const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
+      const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'desc'
 
       // 获取数据（使用子查询只获取每个用户最新的封禁记录）
-      const dataQuery = `
-        SELECT u.*,
-               COALESCE(ub.status, -1) as ban_status,
-               ub.reason as ban_reason,
-               ub.end_time as ban_end_time,
-               ub.created_at as ban_created_at
-        FROM users u
-        LEFT JOIN (
-          SELECT user_id, status, reason, end_time, created_at
-          FROM user_ban
-          WHERE id IN (
-            SELECT MAX(id)
-            FROM user_ban
-            WHERE status IN (0, 3)
-            GROUP BY user_id
-          )
-        ) ub ON u.id = ub.user_id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `
-      const [users] = await pool.execute(dataQuery, [...params, String(limit), String(offset)])
+      const users = await query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(limit).offset(offset)
 
       // 处理用户数据
       for (let user of users) {
@@ -2139,26 +2150,29 @@ const usersCrudConfig = {
 
     getOne: async (req) => {
       const userId = req.params.id
+      const db = getDB();
 
-      const [userResult] = await pool.execute(`
-        SELECT u.*,
-               COALESCE(ub.status, -1) as ban_status,
-               ub.reason as ban_reason,
-               ub.end_time as ban_end_time,
-               ub.created_at as ban_created_at
-        FROM users u
-        LEFT JOIN (
-          SELECT user_id, status, reason, end_time, created_at
-          FROM user_ban
-          WHERE id IN (
-            SELECT MAX(id)
-            FROM user_ban
-            WHERE status IN (0, 3)
-            GROUP BY user_id
-          )
-        ) ub ON u.id = ub.user_id
-        WHERE u.id = ?
-      `, [String(userId)])
+      const banSubquery = db('user_ban')
+        .whereIn('id', function() {
+          this.select(db.raw('MAX(id)'))
+            .from('user_ban')
+            .where('status', 0)
+            .orWhere('status', 3)
+            .groupBy('user_id');
+        })
+        .select('user_id', 'status', 'reason', 'end_time', 'created_at')
+        .as('ub');
+
+      const userResult = await db({ u: 'users' })
+        .leftJoin(banSubquery, 'u.id', 'ub.user_id')
+        .where({ 'u.id': String(userId) })
+        .select(
+          'u.*',
+          db.raw("COALESCE(ub.status, -1) as ban_status"),
+          'ub.reason as ban_reason',
+          'ub.end_time as ban_end_time',
+          'ub.created_at as ban_created_at'
+        );
 
       if (userResult.length === 0) {
         return null
@@ -2240,10 +2254,8 @@ router.delete('/users', adminAuth, requirePermission('users:delete'), usersHandl
 // 更新用户is_active状态的辅助函数
 async function updateUserActiveStatus(userId, active, operatorId) {
   try {
-    await pool.execute(
-      'UPDATE users SET is_active = ? WHERE id = ?',
-      [active ? 1 : 0, String(userId)]
-    )
+    const db = getDB();
+    await db('users').where({ id: String(userId) }).update({ is_active: active ? 1 : 0 })
     console.log(`用户 ${userId} 的is_active状态已更新为 ${active ? 1 : 0}，操作人：${operatorId}`)
   } catch (error) {
     console.error('更新用户is_active状态失败:', error)
@@ -2254,19 +2266,17 @@ async function updateUserActiveStatus(userId, active, operatorId) {
 // 撤销现有封禁记录的辅助函数
 async function revokeExistingBans(userId, operatorId) {
   try {
+    const db = getDB();
     // 检查是否已经有未解除的封禁记录
-    const [existingBan] = await pool.execute(
-      'SELECT id FROM user_ban WHERE user_id = ? AND status IN (0, 3)',
-      [String(userId)]
-    )
+    const existingBan = await db('user_ban')
+      .where({ user_id: String(userId) })
+      .whereIn('status', [0, 3])
+      .select('id')
 
     // 如果有未解除的封禁记录，先将其状态改为"封禁撤销"
     if (existingBan.length > 0) {
       const updatePromises = existingBan.map(ban =>
-        pool.execute(
-          'UPDATE user_ban SET status = 4, operator = ? WHERE id = ?',
-          [operatorId, ban.id]
-        )
+        db('user_ban').where({ id: ban.id }).update({ status: 4, operator: operatorId })
       )
       await Promise.all(updatePromises)
 
@@ -2292,8 +2302,10 @@ router.post('/users/:id/ban', adminAuth, requirePermission('users:ban'), async (
 
     console.log(`开始封禁用户 ${userId}，操作人：${adminId}`)
 
+    const db = getDB();
+
     // 检查用户是否存在
-    const [userResult] = await pool.execute('SELECT id FROM users WHERE id = ?', [String(userId)])
+    const userResult = await db('users').where({ id: String(userId) }).select('id')
     if (userResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
@@ -2345,10 +2357,13 @@ router.post('/users/:id/ban', adminAuth, requirePermission('users:ban'), async (
     data.operator = adminId
 
     // 创建新的封禁记录
-    await pool.execute(
-      'INSERT INTO user_ban (user_id, reason, end_time, status, operator) VALUES (?, ?, ?, ?, ?)',
-      [String(data.user_id), data.reason, data.end_time, data.status, String(data.operator)]
-    )
+    await db('user_ban').insert({
+      user_id: String(data.user_id),
+      reason: data.reason,
+      end_time: data.end_time,
+      status: data.status,
+      operator: String(data.operator)
+    })
 
     console.log(`用户 ${userId} 封禁记录已创建`)
 
@@ -2371,11 +2386,12 @@ router.post('/users/:id/ban', adminAuth, requirePermission('users:ban'), async (
 // 解封用户的辅助函数
 async function unbanUser(userId, operatorId) {
   try {
+    const db = getDB();
     // 查找用户的活跃封禁记录
-    const [banResult] = await pool.execute(
-      'SELECT id FROM user_ban WHERE user_id = ? AND status IN (0, 3)',
-      [String(userId)]
-    )
+    const banResult = await db('user_ban')
+      .where({ user_id: String(userId) })
+      .whereIn('status', [0, 3])
+      .select('id')
 
     if (banResult.length === 0) {
       throw new Error('该用户没有活跃的封禁记录')
@@ -2383,10 +2399,7 @@ async function unbanUser(userId, operatorId) {
 
     // 更新所有活跃封禁记录为管理员解封
     const updatePromises = banResult.map(ban =>
-      pool.execute(
-        'UPDATE user_ban SET status = 1, operator = ? WHERE id = ?',
-        [String(operatorId), ban.id]
-      )
+      db('user_ban').where({ id: ban.id }).update({ status: 1, operator: String(operatorId) })
     )
     await Promise.all(updatePromises)
 
@@ -2412,8 +2425,10 @@ router.post('/users/:id/unban', adminAuth, requirePermission('users:ban'), async
 
     console.log(`开始解封用户 ${userId}，操作人：${adminId}`)
 
+    const db = getDB();
+
     // 检查用户是否存在
-    const [userResult] = await pool.execute('SELECT id FROM users WHERE id = ?', [String(userId)])
+    const userResult = await db('users').where({ id: String(userId) }).select('id')
     if (userResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.NOT_FOUND,
@@ -2468,10 +2483,8 @@ const adminsCrudConfig = {
     }
 
     // 检查用户名是否已存在
-    const [existing] = await pool.execute(
-      'SELECT id FROM admin WHERE username = ?',
-      [data.username]
-    )
+    const db = getDB();
+    const existing = await db('admin').where({ username: data.username }).select('id')
     if (existing.length > 0) {
       return {
         isValid: false,
@@ -2567,37 +2580,36 @@ router.get('/admins', adminAuth, requirePermission('admins:view'), adminsHandler
 router.get('/monitor/activities', adminAuth, requirePermission('monitor:view'), async (req, res) => {
   try {
     const activities = []
+    const db = getDB();
 
     // 获取最近10个新注册用户
-    const [newUsers] = await pool.execute(
-      `SELECT id, user_id, nickname, avatar, created_at, 'user_register' as type
-       FROM users
-       ORDER BY created_at DESC
-       LIMIT ?`,
-      ['10']
-    )
+    const newUsers = await db('users')
+      .select('id', 'user_id', 'nickname', 'avatar', 'created_at')
+      .orderBy('created_at', 'desc')
+      .limit(10)
 
     // 获取最近10篇发布的笔记
-    const [newPosts] = await pool.execute(
-      `SELECT p.id, p.title, p.created_at, u.user_id, u.nickname, u.avatar, 'post_publish' as type
-       FROM posts p
-       LEFT JOIN users u ON p.user_id = u.id
-       WHERE p.status = 0
-       ORDER BY p.created_at DESC
-       LIMIT ?`,
-      ['10']
-    )
+    const newPosts = await db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .where({ 'p.status': 0 })
+      .select(
+        'p.id', 'p.title', 'p.created_at',
+        'u.user_id', 'u.nickname', 'u.avatar'
+      )
+      .orderByRaw('p.created_at DESC')
+      .limit(10)
 
     // 获取最近10条评论
-    const [newComments] = await pool.execute(
-      `SELECT c.id, c.content, c.post_id, c.created_at, u.user_id, u.nickname, u.avatar, p.title as post_title, 'comment_publish' as type
-       FROM comments c
-       LEFT JOIN users u ON c.user_id = u.id
-       LEFT JOIN posts p ON c.post_id = p.id
-       ORDER BY c.created_at DESC
-       LIMIT ?`,
-      ['10']
-    )
+    const newComments = await db({ c: 'comments' })
+      .leftJoin({ u: 'users' }, 'c.user_id', 'u.id')
+      .leftJoin({ p: 'posts' }, 'c.post_id', 'p.id')
+      .select(
+        'c.id', 'c.content', 'c.post_id', 'c.created_at',
+        'u.user_id', 'u.nickname', 'u.avatar',
+        'p.title as post_title'
+      )
+      .orderByRaw('c.created_at DESC')
+      .limit(10)
 
     // 合并所有动态
     newUsers.forEach(user => {
@@ -2679,10 +2691,13 @@ const auditCrudConfig = {
   // 创建后在audit表添加审核记录
   afterCreate: async (id, data, req) => {
     const { user_id, type } = data
-    await pool.execute(
-      'INSERT INTO audit (type, target_id, status, created_at) VALUES (?, ?, 0, NOW())',
-      [type.toString(), user_id.toString()]
-    )
+    const db = getDB();
+    await db('audit').insert({
+      type: type.toString(),
+      target_id: user_id.toString(),
+      status: 0,
+      created_at: db.fn.now()
+    })
   },
 
   // 自定义查询，从user_verification表获取数据
@@ -2690,79 +2705,66 @@ const auditCrudConfig = {
     getList: async (req) => {
       const { page = 1, limit = 10, sortBy = 'created_at', sortOrder = 'DESC', ...filters } = req.query
       const offset = (page - 1) * limit
+      const db = getDB();
 
-      // 构建查询条件
-      let whereClause = 'WHERE 1=1'
-      const queryParams = []
+      // 构建基础查询
+      let query = db({ uv: 'user_verification' })
+        .leftJoin({ u: 'users' }, 'uv.user_id', 'u.id')
+        .select(
+          'uv.id', 'uv.user_id', 'uv.type', 'uv.status',
+          'uv.real_name', 'uv.id_card', 'uv.contact_name',
+          'uv.contact_phone', 'uv.title', 'uv.description',
+          'uv.created_at',
+          'u.user_id as user_display_id',
+          'u.nickname', 'u.avatar'
+        )
 
       // 处理筛选条件
       if (filters.user_id) {
-        whereClause += ` AND uv.user_id = ?`
-        queryParams.push(filters.user_id)
+        query = query.where({ 'uv.user_id': filters.user_id })
       }
 
       if (filters.user_display_id) {
-        whereClause += ` AND u.user_id LIKE ?`
-        queryParams.push(`%${filters.user_display_id}%`)
+        query = query.where('u.user_id', 'like', `%${filters.user_display_id}%`)
       }
 
       if (filters.type) {
-        whereClause += ` AND uv.type = ?`
-        queryParams.push(filters.type)
+        query = query.where({ 'uv.type': filters.type })
       }
 
       if (filters.status !== undefined && filters.status !== '') {
-        whereClause += ` AND uv.status = ?`
-        queryParams.push(parseInt(filters.status))
+        query = query.where({ 'uv.status': parseInt(filters.status) })
       }
 
       // 构建排序
       const validSortFields = ['id', 'created_at', 'status']
       const sortField = validSortFields.includes(sortBy) ? sortBy : 'created_at'
-      const order = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
-
-      // 查询数据
-      const dataQuery = `
-        SELECT 
-          uv.id,
-          uv.user_id,
-          uv.type,
-          uv.status,
-          uv.real_name,
-          uv.id_card,
-          uv.contact_name,
-          uv.contact_phone,
-          uv.title,
-          uv.description,
-          uv.created_at,
-          u.user_id as user_display_id,
-          u.nickname,
-          u.avatar
-        FROM user_verification uv
-        LEFT JOIN users u ON uv.user_id = u.id
-        ${whereClause}
-        ORDER BY uv.${sortField} ${order}
-        LIMIT ? OFFSET ?
-      `
+      const order = sortOrder.toUpperCase() === 'ASC' ? 'asc' : 'desc'
 
       // 查询总数
-      const countQuery = `
-        SELECT COUNT(*) as total
-        FROM user_verification uv
-        LEFT JOIN users u ON uv.user_id = u.id
-        ${whereClause}
-      `
+      let countQuery = db({ uv: 'user_verification' }).leftJoin({ u: 'users' }, 'uv.user_id', 'u.id')
 
-      queryParams.push(parseInt(limit), offset)
+      if (filters.user_id) {
+        countQuery = countQuery.where({ 'uv.user_id': filters.user_id })
+      }
+      if (filters.user_display_id) {
+        countQuery = countQuery.where('u.user_id', 'like', `%${filters.user_display_id}%`)
+      }
+      if (filters.type) {
+        countQuery = countQuery.where({ 'uv.type': filters.type })
+      }
+      if (filters.status !== undefined && filters.status !== '') {
+        countQuery = countQuery.where({ 'uv.status': parseInt(filters.status) })
+      }
 
       const [dataResult, countResult] = await Promise.all([
-        pool.query(dataQuery, queryParams),
-        pool.query(countQuery, queryParams.slice(0, -2))
+        query.orderByRaw(`uv.${sortField} ${order}`).limit(parseInt(limit)).offset(offset),
+        countQuery.count('* as total').first()
       ])
 
       return {
-        data: dataResult[0],
-        total: parseInt(countResult[0][0].total),
+        data: dataResult,
+        total: parseInt(countResult.total),
         page: parseInt(page),
         limit: parseInt(limit)
       }
@@ -2770,30 +2772,22 @@ const auditCrudConfig = {
 
     getOne: async (req) => {
       const { id } = req.params
+      const db = getDB();
 
-      const query = `
-        SELECT 
-          uv.id,
-          uv.user_id,
-          uv.type,
-          uv.status,
-          uv.real_name,
-          uv.id_card,
-          uv.contact_name,
-          uv.contact_phone,
-          uv.title,
-          uv.description,
-          uv.created_at,
-          u.user_id as user_display_id,
-          u.nickname,
-          u.avatar
-        FROM user_verification uv
-        LEFT JOIN users u ON uv.user_id = u.id
-        WHERE uv.id = ?
-      `
+      const result = await db({ uv: 'user_verification' })
+        .leftJoin({ u: 'users' }, 'uv.user_id', 'u.id')
+        .where({ 'uv.id': id })
+        .select(
+          'uv.id', 'uv.user_id', 'uv.type', 'uv.status',
+          'uv.real_name', 'uv.id_card', 'uv.contact_name',
+          'uv.contact_phone', 'uv.title', 'uv.description',
+          'uv.created_at',
+          'u.user_id as user_display_id',
+          'u.nickname', 'u.avatar'
+        )
+        .first()
 
-      const result = await pool.query(query, [id])
-      return result[0][0] || null
+      return result || null
     }
   }
 }
@@ -2853,7 +2847,8 @@ router.put('/audit/:id/approve', adminAuth, requirePermission('audit:audit'), as
     const adminId = req.user.id
 
     // 获取认证记录信息
-    const [verificationResult] = await pool.query('SELECT user_id, type FROM user_verification WHERE id = ?', [id])
+    const db = getDB();
+    const verificationResult = await db('user_verification').where({ id: id }).select('user_id', 'type')
     if (verificationResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.ERROR,
@@ -2864,25 +2859,28 @@ router.put('/audit/:id/approve', adminAuth, requirePermission('audit:audit'), as
     const { user_id, type } = verificationResult[0]
 
     // 开始事务
-    await pool.query('START TRANSACTION')
+    await db.raw('START TRANSACTION')
 
     try {
       // 更新认证状态为通过 (1)
-      await pool.query('UPDATE user_verification SET status = 1 WHERE id = ?', [id])
+      await db('user_verification').where({ id: id }).update({ status: 1 })
 
       // 根据认证类型更新用户的verified字段
       // type: 1-官方认证, 2-个人认证
       const verifiedValue = type === 1 ? 1 : (type === 2 ? 2 : 0)
-      await pool.query('UPDATE users SET verified = ? WHERE id = ?', [verifiedValue, user_id])
+      await db('users').where({ id: String(user_id) }).update({ verified: verifiedValue })
 
       // 更新audit表中的审核记录
-      await pool.query(
-        'UPDATE audit SET status = 1, admin_id = ?, audit_time = NOW() WHERE type = ? AND target_id = ? AND status = 0',
-        [adminId, type, user_id]
-      )
+      await db('audit')
+        .where({ type: type, target_id: String(user_id), status: 0 })
+        .update({
+          status: 1,
+          admin_id: adminId,
+          audit_time: db.fn.now()
+        })
 
       // 提交事务
-      await pool.query('COMMIT')
+      await db.raw('COMMIT')
 
       res.json({
         code: RESPONSE_CODES.SUCCESS,
@@ -2890,7 +2888,7 @@ router.put('/audit/:id/approve', adminAuth, requirePermission('audit:audit'), as
       })
     } catch (error) {
       // 回滚事务
-      await pool.query('ROLLBACK')
+      await db.raw('ROLLBACK')
       throw error
     }
   } catch (error) {
@@ -2911,7 +2909,8 @@ router.put('/audit/:id/reject', adminAuth, requirePermission('audit:audit'), asy
     const adminId = req.user.id
 
     // 获取认证记录信息
-    const [verificationResult] = await pool.query('SELECT user_id, type FROM user_verification WHERE id = ?', [id])
+    const db = getDB();
+    const verificationResult = await db('user_verification').where({ id: id }).select('user_id', 'type')
     if (verificationResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.ERROR,
@@ -2922,23 +2921,26 @@ router.put('/audit/:id/reject', adminAuth, requirePermission('audit:audit'), asy
     const { user_id, type } = verificationResult[0]
 
     // 开始事务
-    await pool.query('START TRANSACTION')
+    await db.raw('START TRANSACTION')
 
     try {
       // 更新认证状态为拒绝 (2)
-      await pool.query('UPDATE user_verification SET status = 2 WHERE id = ?', [id])
+      await db('user_verification').where({ id: id }).update({ status: 2 })
 
       // 拒绝认证申请时，将用户的verified字段设置为0（未认证）
-      await pool.query('UPDATE users SET verified = 0 WHERE id = ?', [user_id])
+      await db('users').where({ id: String(user_id) }).update({ verified: 0 })
 
       // 更新audit表中的审核记录
-      await pool.query(
-        'UPDATE audit SET status = 2, admin_id = ?, audit_time = NOW() WHERE type = ? AND target_id = ? AND status = 0',
-        [adminId, type, user_id]
-      )
+      await db('audit')
+        .where({ type: type, target_id: String(user_id), status: 0 })
+        .update({
+          status: 2,
+          admin_id: adminId,
+          audit_time: db.fn.now()
+        })
 
       // 提交事务
-      await pool.query('COMMIT')
+      await db.raw('COMMIT')
 
       res.json({
         code: RESPONSE_CODES.SUCCESS,
@@ -2946,7 +2948,7 @@ router.put('/audit/:id/reject', adminAuth, requirePermission('audit:audit'), asy
       })
     } catch (error) {
       // 回滚事务
-      await pool.query('ROLLBACK')
+      await db.raw('ROLLBACK')
       throw error
     }
   } catch (error) {
@@ -2989,20 +2991,15 @@ const categoriesCrudConfig = {
     }
 
     // 检查分类名称是否已存在
-    const [existingName] = await pool.execute(
-      'SELECT id FROM categories WHERE name = ?',
-      [name.trim()]
-    )
+    const db = getDB();
+    const existingName = await db('categories').where({ name: name.trim() }).select('id')
 
     if (existingName.length > 0) {
       return { isValid: false, message: '分类名称已存在' }
     }
 
     // 检查分类英文标题是否已存在
-    const [existingTitle] = await pool.execute(
-      'SELECT id FROM categories WHERE category_title = ?',
-      [category_title.trim()]
-    )
+    const existingTitle = await db('categories').where({ category_title: category_title.trim() }).select('id')
 
     if (existingTitle.length > 0) {
       return { isValid: false, message: '分类英文标题已存在' }
@@ -3029,10 +3026,8 @@ const categoriesCrudConfig = {
 
     if (name) {
       // 检查分类名称是否已存在（排除当前记录）
-      const [existingName] = await pool.execute(
-        'SELECT id FROM categories WHERE name = ? AND id != ?',
-        [name.trim(), id]
-      )
+      const db = getDB();
+      const existingName = await db('categories').where({ name: name.trim() }).whereNot({ id: id }).select('id')
 
       if (existingName.length > 0) {
         return { isValid: false, message: '分类名称已存在' }
@@ -3043,10 +3038,7 @@ const categoriesCrudConfig = {
 
     if (category_title) {
       // 检查分类英文标题是否已存在（排除当前记录）
-      const [existingTitle] = await pool.execute(
-        'SELECT id FROM categories WHERE category_title = ? AND id != ?',
-        [category_title.trim(), id]
-      )
+      const existingTitle = await db('categories').where({ category_title: category_title.trim() }).whereNot({ id: id }).select('id')
 
       if (existingTitle.length > 0) {
         return { isValid: false, message: '分类英文标题已存在' }
@@ -3061,13 +3053,12 @@ const categoriesCrudConfig = {
   // 删除前检查
   beforeDelete: async (id) => {
     // 检查是否有笔记使用此分类
-    const [posts] = await pool.execute(
-      'SELECT COUNT(*) as count FROM posts WHERE category_id = ?',
-      [id]
-    )
+    const db = getDB();
+    const posts = await db('posts').where({ category_id: id }).count('* as count')
+    const count = typeof posts === 'object' && posts[0] ? posts[0].count : posts
 
-    if (posts[0].count > 0) {
-      return { isValid: false, message: `该分类下还有 ${posts[0].count} 篇笔记，无法删除` }
+    if (parseInt(count) > 0) {
+      return { isValid: false, message: `该分类下还有 ${count} 篇笔记，无法删除` }
     }
 
     return { isValid: true }
@@ -3075,11 +3066,8 @@ const categoriesCrudConfig = {
 
   // 批量删除前检查
   beforeDeleteMany: async (ids) => {
-    const placeholders = ids.map(() => '?').join(',')
-    const [posts] = await pool.execute(
-      `SELECT category_id, COUNT(*) as count FROM posts WHERE category_id IN (${placeholders}) GROUP BY category_id`,
-      ids
-    )
+    const db = getDB();
+    const posts = await db('posts').whereIn('category_id', ids).select('category_id', db.raw('COUNT(*) as count')).groupBy('category_id')
 
     if (posts.length > 0) {
       const categoryIds = posts.map(p => p.category_id).join(', ')
@@ -3102,33 +3090,30 @@ const categoriesCrudConfig = {
       }
 
       // 检查分类名称是否已存在
-      const [existingName] = await pool.execute(
-        'SELECT id FROM categories WHERE name = ?',
-        [name.trim()]
-      );
+      const db = getDB();
+      const existingName = await db('categories').where({ name: name.trim() }).select('id');
 
       if (existingName.length > 0) {
         throw new Error('分类名称已存在');
       }
 
       // 检查分类英文标题是否已存在
-      const [existingTitle] = await pool.execute(
-        'SELECT id FROM categories WHERE category_title = ?',
-        [category_title.trim()]
-      );
+      const existingTitle = await db('categories')
+        .where({ category_title: category_title.trim() })
+        .select('id');
 
       if (existingTitle.length > 0) {
         throw new Error('分类英文标题已存在');
       }
 
       // 创建分类
-      const [result] = await pool.execute(
-        'INSERT INTO categories (name, category_title) VALUES (?, ?)',
-        [name.trim(), category_title.trim()]
-      );
+      const [result] = await db('categories').insert({
+        name: name.trim(),
+        category_title: category_title.trim()
+      });
 
       return {
-        id: result.insertId,
+        id: result[0],
         name: name.trim(),
         category_title: category_title.trim()
       };
@@ -3137,22 +3122,25 @@ const categoriesCrudConfig = {
     getList: async (req) => {
       const { page = 1, limit = 10, sortField = 'id', sortOrder = 'asc', name, category_title } = req.query
       const offset = (parseInt(page) - 1) * parseInt(limit)
+      const db = getDB();
 
-      // 构建WHERE条件
-      const conditions = []
-      const queryParams = []
+      // 构建基础查询
+      let query = db({ c: 'categories' })
+        .leftJoin({ p: 'posts' }, 'c.id', 'p.category_id')
+        .select(
+          'c.id', 'c.name', 'c.category_title', 'c.created_at',
+          db.raw('COUNT(p.id) as post_count')
+        )
+        .groupBy('c.id', 'c.name', 'c.category_title', 'c.created_at')
 
+      // 处理筛选条件
       if (name && typeof name === 'string' && name.trim()) {
-        conditions.push('c.name LIKE ?')
-        queryParams.push(`%${name.trim()}%`)
+        query = query.where('c.name', 'like', `%${name.trim()}%`)
       }
 
       if (category_title && typeof category_title === 'string' && category_title.trim()) {
-        conditions.push('c.category_title LIKE ?')
-        queryParams.push(`%${category_title.trim()}%`)
+        query = query.where('c.category_title', 'like', `%${category_title.trim()}%`)
       }
-
-      const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
 
       // 使用对象映射验证排序字段
       const allowedSortFields = {
@@ -3162,48 +3150,33 @@ const categoriesCrudConfig = {
         'created_at': 'c.created_at',
         'post_count': 'post_count'
       }
-
-      const allowedSortOrders = {
-        'asc': 'ASC',
-        'desc': 'DESC'
-      }
+      const allowedSortOrders = { 'asc': 'asc', 'desc': 'desc' }
 
       const validSortField = allowedSortFields[sortField] || allowedSortFields['id']
       const validSortOrder = allowedSortOrders[sortOrder?.toLowerCase()] || allowedSortOrders['asc']
 
       // 获取总数
-      const [countResult] = await pool.execute(`
-        SELECT COUNT(DISTINCT c.id) as total
-        FROM categories c
-        ${whereClause}
-      `, queryParams)
+      let countQuery = db({ c: 'categories' })
 
-      // 获取数据 - 直接拼接LIMIT和OFFSET
-      const limitNum = parseInt(limit)
-      const offsetNum = parseInt(offset)
+      if (name && typeof name === 'string' && name.trim()) {
+        countQuery = countQuery.where('c.name', 'like', `%${name.trim()}%`)
+      }
+      if (category_title && typeof category_title === 'string' && category_title.trim()) {
+        countQuery = countQuery.where('c.category_title', 'like', `%${category_title.trim()}%`)
+      }
 
-      const [categories] = await pool.execute(`
-        SELECT 
-          c.id,
-          c.name,
-          c.category_title,
-          c.created_at,
-          COUNT(p.id) as post_count
-        FROM categories c
-        LEFT JOIN posts p ON c.id = p.category_id
-        ${whereClause}
-        GROUP BY c.id, c.name, c.category_title, c.created_at
-        ORDER BY ${validSortField} ${validSortOrder}
-        LIMIT ${limitNum} OFFSET ${offsetNum}
-      `, queryParams); // 只传递WHERE条件的参数
+      const [countResult, categories] = await Promise.all([
+        countQuery.count('* as total').first(),
+        query.orderByRaw(`${validSortField} ${validSortOrder}`).limit(parseInt(limit)).offset(offset)
+      ])
 
       return {
         data: categories,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: countResult[0].total,
-          totalPages: Math.ceil(countResult[0].total / parseInt(limit))
+          total: parseInt(countResult.total),
+          totalPages: Math.ceil(parseInt(countResult.total) / parseInt(limit))
         }
       }
     }

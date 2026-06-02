@@ -31,7 +31,7 @@ const {
   markTokensAsTemporarilyInvalidated,
   invalidateAllTokens
 } = require('../utils/yggdrasilHelper');
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 
 const MAX_PROFILES_PER_USER = parseInt(process.env.MAX_PROFILES_PER_USER) || 3;
 const SKIN_MAX_SIZE = 500 * 1024;
@@ -105,12 +105,12 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
       });
     }
 
-    const [countResult] = await pool.execute(
-      `SELECT COUNT(*) as count FROM mc_profiles WHERE user_id = ? AND is_deleted = 0`,
-      [req.user.id]
-    );
+    const db = getDB();
+    const [countResult] = await db('mc_profiles')
+      .where({ user_id: req.user.id, is_deleted: false })
+      .count('* as count');
 
-    if (countResult[0].count >= MAX_PROFILES_PER_USER) {
+    if (parseInt(countResult.count) >= MAX_PROFILES_PER_USER) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({
         code: RESPONSE_CODES.VALIDATION_ERROR,
         message: `每个用户最多创建 ${MAX_PROFILES_PER_USER} 个角色`
@@ -132,10 +132,9 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
     console.log(`[Game] 创建角色 - userId: ${userId}, type: ${typeof userId}, playerName: ${player_name}`);
 
     // 验证用户是否存在
-    const [userCheck] = await pool.execute(
-      'SELECT id FROM users WHERE id = ?',
-      [userId]
-    );
+    const userCheck = await db('users')
+      .where({ id: userId })
+      .select('id');
 
     if (userCheck.length === 0) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({
@@ -144,13 +143,16 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
       });
     }
 
-    const [result] = await pool.execute(
-      `INSERT INTO mc_profiles (user_id, player_name, uuid, password_hash)
-       VALUES (?, ?, ?, ?)`,
-      [userId, player_name.trim(), uuid, passwordHash]
-    );
+    const [result] = await db('mc_profiles')
+      .insert({
+        user_id: userId,
+        player_name: player_name.trim(),
+        uuid,
+        password_hash: passwordHash
+      })
+      .returning('id');
 
-    await auditLog('PROFILE_CREATE', userId, result.insertId, req.ip, {
+    await auditLog('PROFILE_CREATE', userId, result[0].id, req.ip, {
       player_name: player_name.trim(),
       uuid
     });
@@ -160,7 +162,7 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
     res.status(HTTP_STATUS.CREATED).json({
       code: RESPONSE_CODES.SUCCESS,
       data: {
-        id: result.insertId,
+        id: result[0].id,
         player_name: player_name.trim(),
         uuid
       },
@@ -214,10 +216,10 @@ router.put('/profile/:id/name', authenticateToken, async (req, res) => {
 
     const oldName = profile.player_name;
 
-    await pool.execute(
-      `UPDATE mc_profiles SET player_name = ? WHERE id = ?`,
-      [new_name.trim(), profileId]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profileId })
+      .update({ player_name: new_name.trim() });
 
     // 角色改名后，将该角色的所有 Token 标记为暂时失效
     // 这样启动器会刷新令牌，获取到新的角色名称
@@ -266,11 +268,10 @@ router.delete('/profile/:id', authenticateToken, async (req, res) => {
       });
     }
 
-    // 软删除：标记为已删除，吊销所有令牌
-    await pool.execute(
-      `UPDATE mc_profiles SET is_deleted = 1, skin_url = NULL, cape_url = NULL WHERE id = ?`,
-      [profileId]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profileId })
+      .update({ is_deleted: true, skin_url: null, cape_url: null });
 
     // 吊销该角色的所有令牌
     await invalidateAllTokens(profileId);
@@ -335,10 +336,10 @@ router.put('/profile/:id/password', authenticateToken, async (req, res) => {
 
     const newPasswordHash = await hashPassword(new_password);
 
-    await pool.execute(
-      `UPDATE mc_profiles SET password_hash = ? WHERE id = ?`,
-      [newPasswordHash, profileId]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profileId })
+      .update({ password_hash: newPasswordHash });
 
     await auditLog('PASSWORD_CHANGE', req.user.id, profileId, req.ip);
 
@@ -419,14 +420,15 @@ router.post('/profile/:id/skin', authenticateToken, upload.single('skin'), async
       });
     }
 
-    await pool.execute(
-      `UPDATE mc_profiles SET skin_url = ?, skin_model = ? WHERE id = ?`,
-      [result.url, model, profileId]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profileId })
+      .update({ skin_url: result.url, skin_model: model });
 
-    await pool.execute(
-      `INSERT IGNORE INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata)
-       VALUES (?, 'skin', ?, ?, ?)`,
+    await db.raw(
+      `INSERT INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata)
+       VALUES (?, 'skin', ?, ?, ?)
+       ON CONFLICT (profile_id, texture_type) DO NOTHING`,
       [profileId, textureHash, result.url, JSON.stringify({ size: req.file.size, model })]
     );
 
@@ -477,10 +479,10 @@ router.delete('/profile/:id/skin', authenticateToken, async (req, res) => {
       });
     }
 
-    await pool.execute(
-      `UPDATE mc_profiles SET skin_url = NULL, skin_model = 'classic' WHERE id = ?`,
-      [profileId]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profileId })
+      .update({ skin_url: null, skin_model: 'classic' });
 
     await auditLog('SKIN_DELETE', req.user.id, profileId, req.ip);
 
@@ -553,14 +555,15 @@ router.post('/profile/:id/cape', authenticateToken, upload.single('cape'), async
       });
     }
 
-    await pool.execute(
-      `UPDATE mc_profiles SET cape_url = ? WHERE id = ?`,
-      [result.url, profileId]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profileId })
+      .update({ cape_url: result.url });
 
-    await pool.execute(
-      `INSERT IGNORE INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata)
-       VALUES (?, 'cape', ?, ?, ?)`,
+    await db.raw(
+      `INSERT INTO mc_textures (profile_id, texture_type, texture_hash, url, metadata)
+       VALUES (?, 'cape', ?, ?, ?)
+       ON CONFLICT (profile_id, texture_type) DO NOTHING`,
       [profileId, textureHash, result.url, JSON.stringify({ size: req.file.size })]
     );
 
@@ -607,10 +610,10 @@ router.delete('/profile/:id/cape', authenticateToken, async (req, res) => {
       });
     }
 
-    await pool.execute(
-      `UPDATE mc_profiles SET cape_url = NULL WHERE id = ?`,
-      [profileId]
-    );
+    const db = getDB();
+    await db('mc_profiles')
+      .where({ id: profileId })
+      .update({ cape_url: null });
 
     await auditLog('CAPE_DELETE', req.user.id, profileId, req.ip);
 

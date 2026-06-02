@@ -1,15 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 
 // 获取所有标签
 router.get('/', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
-      'SELECT * FROM tags ORDER BY name ASC'
-    );
-
+    const db = getDB();
+    const rows = await db('tags')
+      .select('*')
+      .orderBy('name', 'asc');
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -25,16 +25,15 @@ router.get('/', async (req, res) => {
 // 获取热门标签
 router.get('/hot', async (req, res) => {
   try {
+    const db = getDB();
     const limit = parseInt(req.query.limit) || 10;
-    // 直接使用 use_count 字段获取热门标签
-    const [rows] = await pool.execute(
-      `SELECT * FROM tags
-       WHERE use_count > 0
-       ORDER BY use_count DESC, name ASC
-       LIMIT ?`,
-      [String(limit)]
-    );
-
+    
+    const rows = await db('tags')
+      .select('*')
+      .where('use_count', '>', 0)
+      .orderBy('use_count', 'desc')
+      .orderBy('name', 'asc')
+      .limit(limit);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,

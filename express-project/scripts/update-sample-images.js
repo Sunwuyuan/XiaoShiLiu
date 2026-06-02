@@ -1,18 +1,14 @@
-//该文件用于更新数据库中来自栗次元api的图片链接
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
-// 图片更新器
 class ImageUpdater {
   constructor() {
-    // 初始化时不读取文件，而是先更新链接文件
     this.newAvatarLinks = [];
     this.newImageLinks = [];
   }
 
-  // 从文件加载链接
   loadLinksFromFile(filename) {
     try {
       const filePath = path.join(__dirname, filename);
@@ -24,7 +20,6 @@ class ImageUpdater {
     }
   }
 
-  // 获取随机图片URL
   getRandomImageUrl(imageType = 'post') {
     const links = imageType === 'avatar' ? this.newAvatarLinks : this.newImageLinks;
     if (links.length === 0) {
@@ -35,20 +30,18 @@ class ImageUpdater {
     return links[randomIndex];
   }
 
-  // 检查URL是否为tc.alcy.cc图床的图片
   isTcAlcyImage(url) {
     return url && typeof url === 'string' && url.includes('tc.alcy.cc');
   }
 
-  // 更新用户头像
-  async updateUserAvatars(connection) {
+  async updateUserAvatars() {
     console.log('开始更新用户头像...');
+    const db = getDB();
 
     try {
-      // 查询所有使用tc.alcy.cc图床的用户头像
-      const [users] = await connection.execute(
-        'SELECT id, avatar FROM users WHERE avatar LIKE "%tc.alcy.cc%"'
-      );
+      const users = await db('users')
+        .select('id', 'avatar')
+        .where('avatar', 'like', '%tc.alcy.cc%');
 
       console.log(`找到 ${users.length} 个需要更新的用户头像`);
 
@@ -57,10 +50,9 @@ class ImageUpdater {
         if (this.isTcAlcyImage(user.avatar)) {
           const newAvatarUrl = this.getRandomImageUrl('avatar');
           if (newAvatarUrl) {
-            await connection.execute(
-              'UPDATE users SET avatar = ? WHERE id = ?',
-              [newAvatarUrl, user.id]
-            );
+            await db('users')
+              .where('id', user.id)
+              .update({ avatar: newAvatarUrl });
             updatedCount++;
           }
         }
@@ -73,15 +65,14 @@ class ImageUpdater {
     }
   }
 
-  // 更新笔记图片
-  async updatePostImages(connection) {
+  async updatePostImages() {
     console.log('开始更新笔记图片...');
+    const db = getDB();
 
     try {
-      // 查询所有使用tc.alcy.cc图床的笔记图片
-      const [images] = await connection.execute(
-        'SELECT id, image_url FROM post_images WHERE image_url LIKE "%tc.alcy.cc%"'
-      );
+      const images = await db('post_images')
+        .select('id', 'image_url')
+        .where('image_url', 'like', '%tc.alcy.cc%');
 
       console.log(`找到 ${images.length} 个需要更新的笔记图片`);
 
@@ -90,10 +81,9 @@ class ImageUpdater {
         if (this.isTcAlcyImage(image.image_url)) {
           const newImageUrl = this.getRandomImageUrl('post');
           if (newImageUrl) {
-            await connection.execute(
-              'UPDATE post_images SET image_url = ? WHERE id = ?',
-              [newImageUrl, image.id]
-            );
+            await db('post_images')
+              .where('id', image.id)
+              .update({ image_url: newImageUrl });
             updatedCount++;
           }
         }
@@ -106,29 +96,29 @@ class ImageUpdater {
     }
   }
 
-  // 统计更新信息
-  async printUpdateStats(connection) {
+  async printUpdateStats() {
     console.log('\n更新统计信息:');
+    const db = getDB();
 
     try {
-      // 统计用户头像
-      const [avatarStats] = await connection.execute(
-        'SELECT COUNT(*) as total, SUM(CASE WHEN avatar LIKE "%tc.alcy.cc%" THEN 1 ELSE 0 END) as tc_alcy_count FROM users WHERE avatar IS NOT NULL'
-      );
+      const avatarStats = await db('users')
+        .count('* as total')
+        .countRaw("SUM(CASE WHEN avatar LIKE '%tc.alcy.cc%' THEN 1 ELSE 0 END)", 'as tc_alcy_count')
+        .whereNotNull('avatar')
+        .first();
 
-      // 统计笔记图片
-      const [imageStats] = await connection.execute(
-        'SELECT COUNT(*) as total, SUM(CASE WHEN image_url LIKE "%tc.alcy.cc%" THEN 1 ELSE 0 END) as tc_alcy_count FROM post_images'
-      );
+      const imageStats = await db('post_images')
+        .count('* as total')
+        .countRaw("SUM(CASE WHEN image_url LIKE '%tc.alcy.cc%' THEN 1 ELSE 0 END)", 'as tc_alcy_count')
+        .first();
 
-      console.log(`用户头像: 总计 ${avatarStats[0].total} 个，其中 ${avatarStats[0].tc_alcy_count} 个来自 tc.alcy.cc`);
-      console.log(`笔记图片: 总计 ${imageStats[0].total} 个，其中 ${imageStats[0].tc_alcy_count} 个来自 tc.alcy.cc`);
+      console.log(`用户头像: 总计 ${avatarStats.total} 个，其中 ${avatarStats.tc_alcy_count || 0} 个来自 tc.alcy.cc`);
+      console.log(`笔记图片: 总计 ${imageStats.total} 个，其中 ${imageStats.tc_alcy_count || 0} 个来自 tc.alcy.cc`);
     } catch (error) {
       console.error('❌ 获取统计信息失败:', error);
     }
   }
 
-  // 从API获取图片链接
   async fetchImageLinks(url) {
     return new Promise((resolve, reject) => {
       https.get(url, (res) => {
@@ -150,20 +140,18 @@ class ImageUpdater {
     });
   }
 
-  // 更新图片链接文件
   async updateImageLinkFiles() {
     try {
-      // 清空并获取头像链接
       const avatarLinks = await this.fetchImageLinks('https://t.alcy.cc/tx/?json&quantity=50');
       const avatarFilePath = path.join(__dirname, '../imgLinks/avatar_link.txt');
       fs.writeFileSync(avatarFilePath, avatarLinks.join('\n'), 'utf8');
-      // 清空并获取笔记图片链接
+
       const postLinks1 = await this.fetchImageLinks('https://t.alcy.cc/moemp/?json&quantity=100');
       const postLinks2 = await this.fetchImageLinks('https://t.alcy.cc/mp/?json&quantity=200');
       const allPostLinks = [...postLinks1, ...postLinks2];
       const postFilePath = path.join(__dirname, '../imgLinks/post_img_link.txt');
       fs.writeFileSync(postFilePath, allPostLinks.join('\n'), 'utf8');
-      // 更新内存中的链接数组
+
       this.newAvatarLinks = avatarLinks;
       this.newImageLinks = allPostLinks;
 
@@ -174,9 +162,7 @@ class ImageUpdater {
     }
   }
 
-  // 执行更新
   async updateImages() {
-    // 首先更新图片链接文件
     await this.updateImageLinkFiles();
     console.log(`可用头像链接: ${this.newAvatarLinks.length} 个`);
     console.log(`可用笔记图片链接: ${this.newImageLinks.length} 个\n`);
@@ -186,50 +172,37 @@ class ImageUpdater {
       return;
     }
 
-    let connection;
     try {
-      // 从连接池获取连接
-      connection = await pool.getConnection();
       console.log('数据库连接成功\n');
 
-      // 显示更新前的统计信息
       console.log('更新前的统计信息:');
-      await this.printUpdateStats(connection);
+      await this.printUpdateStats();
       console.log('');
 
-      // 更新用户头像
       if (this.newAvatarLinks.length > 0) {
-        await this.updateUserAvatars(connection);
+        await this.updateUserAvatars();
         console.log('');
       } else {
         console.log('⚠️ 跳过用户头像更新（没有可用的头像链接）\n');
       }
 
-      // 更新笔记图片
       if (this.newImageLinks.length > 0) {
-        await this.updatePostImages(connection);
+        await this.updatePostImages();
         console.log('');
       } else {
         console.log('⚠️ 跳过笔记图片更新（没有可用的笔记图片链接）\n');
       }
 
-      // 显示更新后的统计信息
       console.log('更新后的统计信息:');
-      await this.printUpdateStats(connection);
+      await this.printUpdateStats();
 
       console.log('\n图片更新完成！');
     } catch (error) {
       console.error('❌ 更新过程中发生错误:', error);
-    } finally {
-      if (connection) {
-        connection.release();
-        console.log('\n数据库连接已释放回连接池');
-      }
     }
   }
 }
 
-// 如果直接运行此脚本
 if (require.main === module) {
   const updater = new ImageUpdater();
   updater.updateImages();

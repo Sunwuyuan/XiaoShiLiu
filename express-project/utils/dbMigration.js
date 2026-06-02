@@ -1,41 +1,57 @@
-const { pool } = require('../config/config');
+const { getDB } = require('./db');
 
 async function checkAndMigrateAdminTable() {
   try {
     console.log('检查 admin 表结构...');
+    const db = getDB();
 
     const columnsToCheck = [
-      { name: 'logto_id', sql: "ALTER TABLE admin ADD COLUMN logto_id VARCHAR(128) DEFAULT NULL COMMENT 'Logto用户唯一ID' AFTER id" },
-      { name: 'permissions', sql: "ALTER TABLE admin ADD COLUMN permissions JSON DEFAULT NULL COMMENT '权限列表'" },
-      { name: 'is_super', sql: "ALTER TABLE admin ADD COLUMN is_super TINYINT(1) DEFAULT 0 COMMENT '是否超级管理员 1-是 0-否'" },
-      { name: 'created_by', sql: "ALTER TABLE admin ADD COLUMN created_by BIGINT(20) DEFAULT NULL COMMENT '创建者管理员ID'" },
-      { name: 'updated_at', sql: "ALTER TABLE admin ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'" },
-      { name: 'nickname', sql: "ALTER TABLE admin ADD COLUMN nickname VARCHAR(100) DEFAULT NULL COMMENT '昵称'" }
+      { name: 'logto_id', type: 'string', length: 128 },
+      { name: 'permissions', type: 'json' },
+      { name: 'is_super', type: 'boolean', default: false },
+      { name: 'created_by', type: 'bigint' },
+      { name: 'updated_at', type: 'timestamp' },
+      { name: 'nickname', type: 'string', length: 100 }
     ];
 
     for (const col of columnsToCheck) {
-      const [rows] = await pool.execute(
-        `SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin' AND COLUMN_NAME = ?`,
-        [col.name]
-      );
-
-      if (rows[0].count === 0) {
-        await pool.execute(col.sql);
+      const exists = await db.schema.hasColumn('admin', col.name);
+      
+      if (!exists) {
+        await db.schema.table('admin', (table) => {
+          switch(col.type) {
+            case 'string':
+              table.string(col.name, col.length || 255).defaultTo(null).alter();
+              break;
+            case 'json':
+              table.json(col.name).defaultTo(null).alter();
+              break;
+            case 'boolean':
+              table.boolean(col.name).defaultTo(col.default || false).alter();
+              break;
+            case 'bigint':
+              table.bigInteger(col.name).defaultTo(null).alter();
+              break;
+            case 'timestamp':
+              table.timestamp(col.name).defaultTo(db.fn.now()).alter();
+              break;
+          }
+        });
+        console.log(`添加字段: ${col.name}`);
       }
     }
 
-    // 检查是否有超级管理员
-    const [admins] = await pool.execute(
-      'SELECT id, username, is_super FROM admin WHERE is_super = 1 LIMIT 1'
-    );
+    const admin = await db('admin').where('is_super', 1).first();
 
-    if (admins.length === 0) {
-      // 将第一个管理员设置为超级管理员
-      await pool.execute(
-        'UPDATE admin SET is_super = 1, nickname = COALESCE(nickname, username) WHERE id = (SELECT MIN(id) FROM admin)'
-      );
+    if (!admin) {
+      await db('admin')
+        .where('id', db('admin').min('id'))
+        .update({
+          is_super: 1,
+          nickname: db.raw('COALESCE(nickname, username)')
+        });
     }
+
     console.log('Admin 表迁移完成');
     
     return true;

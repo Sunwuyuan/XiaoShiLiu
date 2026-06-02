@@ -1,5 +1,7 @@
 const { verifyToken } = require('../utils/jwt');
 const config = require('../config/config');
+const { getDB } = require('../utils/db');
+const { HTTP_STATUS, RESPONSE_CODES } = require('../constants');
 
 /**
  * 从请求头或Cookie中提取token
@@ -33,8 +35,6 @@ function extractTokenFromHeader(req) {
 
   return null;
 }
-const { pool } = require('../config/config');
-const { HTTP_STATUS, RESPONSE_CODES } = require('../constants');
 
 /**
  * 认证中间件 - 验证JWT token
@@ -42,50 +42,32 @@ const { HTTP_STATUS, RESPONSE_CODES } = require('../constants');
 async function authenticateToken(req, res, next) {
   try {
     const token = extractTokenFromHeader(req);
+    const db = getDB();
 
     let decoded;
 
-    if (req.path && (req.path.includes('/admin') || req.path.includes('/me'))) {
-      if (!token) {
-        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-          code: RESPONSE_CODES.UNAUTHORIZED,
-          message: '访问令牌缺失'
-        });
-      }
+    if (!token) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '访问令牌缺失'
+      });
+    }
 
-      try {
-        decoded = verifyToken(token);
-      } catch (verifyError) {
-        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-          code: RESPONSE_CODES.UNAUTHORIZED,
-          message: '无效的访问令牌'
-        });
-      }
-    } else {
-      if (!token) {
-        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-          code: RESPONSE_CODES.UNAUTHORIZED,
-          message: '访问令牌缺失'
-        });
-      }
-      
-      try {
-        decoded = verifyToken(token);
-      } catch (verifyError) {
-        return res.status(HTTP_STATUS.UNAUTHORIZED).json({
-          code: RESPONSE_CODES.UNAUTHORIZED,
-          message: '无效的访问令牌'
-        });
-      }
+    try {
+      decoded = verifyToken(token);
+    } catch (verifyError) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '无效的访问令牌'
+      });
     }
 
     // 检查是否为管理员token
     if (decoded && (decoded.type === 'admin' || decoded.adminId)) {
       // 管理员token验证 - 需要获取is_super和permissions字段！
-      const [adminRows] = await pool.execute(
-        'SELECT id, username, is_super, permissions FROM admin WHERE id = ?',
-        [decoded.adminId]
-      );
+      const adminRows = await db('admin')
+        .where({ id: decoded.adminId })
+        .select('id', 'username', 'is_super', 'permissions');
 
       if (adminRows.length === 0) {
         return res.status(HTTP_STATUS.UNAUTHORIZED).json({
@@ -95,10 +77,14 @@ async function authenticateToken(req, res, next) {
       }
 
       // 检查管理员会话是否有效
-      const [sessionRows] = await pool.execute(
-        'SELECT id FROM admin_sessions WHERE admin_id = ? AND token = ? AND is_active = 1 AND expires_at > NOW()',
-        [decoded.adminId, token]
-      );
+      const sessionRows = await db('admin_sessions')
+        .where({
+          admin_id: decoded.adminId,
+          token: token,
+          is_active: 1
+        })
+        .where('expires_at', '>', db.fn.now())
+        .select('id');
 
       if (sessionRows.length === 0) {
         return res.status(HTTP_STATUS.UNAUTHORIZED).json({
@@ -142,10 +128,9 @@ async function authenticateToken(req, res, next) {
       }
 
       // 检查用户是否存在且活跃
-      const [userRows] = await pool.execute(
-        'SELECT id, user_id, nickname, avatar, is_active FROM users WHERE id = ? AND is_active = 1',
-        [decoded.userId]
-      );
+      const userRows = await db('users')
+        .where({ id: decoded.userId, is_active: 1 })
+        .select('id', 'user_id', 'nickname', 'avatar', 'is_active');
 
       if (userRows.length === 0) {
         return res.status(HTTP_STATUS.UNAUTHORIZED).json({
@@ -155,10 +140,14 @@ async function authenticateToken(req, res, next) {
       }
 
       // 检查会话是否有效
-      const [sessionRows] = await pool.execute(
-        'SELECT id FROM user_sessions WHERE user_id = ? AND token = ? AND is_active = 1 AND expires_at > NOW()',
-        [decoded.userId, token]
-      );
+      const sessionRows = await db('user_sessions')
+        .where({
+          user_id: decoded.userId,
+          token: token,
+          is_active: 1
+        })
+        .where('expires_at', '>', db.fn.now())
+        .select('id');
 
       if (sessionRows.length === 0) {
         return res.status(HTTP_STATUS.UNAUTHORIZED).json({
@@ -188,6 +177,7 @@ async function authenticateToken(req, res, next) {
 async function optionalAuth(req, res, next) {
   try {
     const token = extractTokenFromHeader(req);
+    const db = getDB();
 
     if (!token) {
       req.user = null;
@@ -195,20 +185,29 @@ async function optionalAuth(req, res, next) {
     }
 
     // 验证token
-    const decoded = verifyToken(token);
+    let decoded;
+    try {
+      decoded = verifyToken(token);
+    } catch (e) {
+      req.user = null;
+      return next();
+    }
 
     // 检查用户是否存在且活跃
-    const [userRows] = await pool.execute(
-      'SELECT id, user_id, nickname, avatar, is_active FROM users WHERE id = ? AND is_active = 1',
-      [decoded.userId]
-    );
+    const userRows = await db('users')
+      .where({ id: decoded.userId, is_active: 1 })
+      .select('id', 'user_id', 'nickname', 'avatar', 'is_active');
 
     if (userRows.length > 0) {
       // 检查会话是否有效
-      const [sessionRows] = await pool.execute(
-        'SELECT id FROM user_sessions WHERE user_id = ? AND token = ? AND is_active = 1 AND expires_at > NOW()',
-        [decoded.userId, token]
-      );
+      const sessionRows = await db('user_sessions')
+        .where({
+          user_id: decoded.userId,
+          token: token,
+          is_active: 1
+        })
+        .where('expires_at', '>', db.fn.now())
+        .select('id');
 
       if (sessionRows.length > 0) {
         req.user = userRows[0];

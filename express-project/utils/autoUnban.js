@@ -3,7 +3,7 @@
  * 定期检查并自动解封过期的用户封禁记录
  */
 
-const { pool } = require('../config/config');
+const { getDB } = require('./db');
 
 /**
  * 自动解封过期用户
@@ -11,36 +11,33 @@ const { pool } = require('../config/config');
  */
 const autoUnbanUsers = async () => {
   try {
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const db = getDB();
     
     // 第一步：查询需要自动解封的封禁记录
-    const [banRecords] = await pool.execute(
-      'SELECT id, user_id FROM user_ban WHERE status = 0 AND end_time IS NOT NULL AND end_time < ?',
-      [now]
-    );
+    const banRecords = await db('user_ban')
+      .select('id', 'user_id')
+      .where({ status: 0 })
+      .whereNotNull('end_time')
+      .where('end_time', '<', db.fn.now());
     
     if (banRecords.length > 0) {
       const banIds = banRecords.map(r => r.id);
       const userIds = banRecords.map(r => r.user_id);
       
-      // 第二步：更新封禁记录状态为自动解封
-      const banPlaceholders = banIds.map(() => '?').join(',');
-      const [banResult] = await pool.execute(
-        `UPDATE user_ban SET status = 2 WHERE id IN (${banPlaceholders})`,
-        banIds
-      );
+      // 第二步：更新封禁记录状态为自动解封（2=自动解封）
+      await db('user_ban')
+        .whereIn('id', banIds)
+        .update({ status: 2 });
       
       // 第三步：更新用户的 is_active 状态为 1（激活）
-      const userPlaceholders = userIds.map(() => '?').join(',');
-      const [userResult] = await pool.execute(
-        `UPDATE users SET is_active = 1 WHERE id IN (${userPlaceholders})`,
-        userIds
-      );
+      await db('users')
+        .whereIn('id', userIds)
+        .update({ is_active: 1 });
       
-      console.log(`● 自动解封 ${banResult.affectedRows} 个用户，重置 ${userResult.affectedRows} 个账号状态`);
+      console.log(`● 自动解封 ${banIds.length} 个用户，重置 ${userIds.length} 个账号状态`);
     }
   } catch (error) {
-    console.error('自动解封失败:', error);
+    console.error('自动解封失败:', error.message);
   }
 };
 

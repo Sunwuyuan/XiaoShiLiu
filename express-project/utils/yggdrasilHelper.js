@@ -11,7 +11,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
-const { pool } = require('../config/config');
+const { getDB } = require('./db');
+
+let dbInstance = null;
+const getDbInstance = () => {
+  if (!dbInstance) dbInstance = getDB();
+  return dbInstance;
+};
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
@@ -53,8 +59,6 @@ function loadPublicKey() {
 
 /**
  * 对数据进行 RSA-SHA1 签名（规范要求 SHA1withRSA）
- * @param {string} data - 要签名的数据（base64 编码的纹理数据）
- * @returns {string|null} - 签名结果（base64 编码），如果私钥不存在则返回 null
  */
 function signData(data) {
   const privateKey = loadPrivateKey();
@@ -75,9 +79,7 @@ function signData(data) {
 }
 
 /**
- * 获取公钥字符串（用于 API 元数据）
- * 规范要求返回完整 PEM 格式（含头尾标记）
- * @returns {string|null} - 完整 PEM 格式公钥，如果不存在则返回 null
+ * 获取公钥字符串
  */
 function getSignaturePublicKey() {
   const publicKey = loadPublicKey();
@@ -89,8 +91,6 @@ const ACCESS_TOKEN_EXPIRES_IN = '7d';
 const REFRESH_TOKEN_EXPIRES_IN = '30d';
 
 function generateAccessToken(profile) {
-  // 使用随机字符串代替 JWT，避免 token 过长
-  // 格式: ygg_ + 32位随机字符串 + 时间戳
   const randomPart = crypto.randomBytes(32).toString('hex');
   const timestamp = Date.now().toString(36);
   return `ygg_${randomPart}_${timestamp}`;
@@ -229,11 +229,13 @@ function createFileHash(buffer) {
 
 async function auditLog(action, userId = null, profileId = null, ipAddress = null, details = null) {
   try {
-    await pool.execute(
-      `INSERT INTO mc_audit_logs (user_id, profile_id, action, ip_address, details)
-       VALUES (?, ?, ?, ?, ?)`,
-      [userId, profileId, action, ipAddress, details ? JSON.stringify(details) : null]
-    );
+    await getDbInstance()('mc_audit_logs').insert({
+      user_id: userId,
+      profile_id: profileId,
+      action: action,
+      ip_address: ipAddress,
+      details: details ? JSON.stringify(details) : null
+    });
   } catch (error) {
     console.error('审计日志记录失败:', error.message);
   }
@@ -242,155 +244,151 @@ async function auditLog(action, userId = null, profileId = null, ipAddress = nul
 async function getProfileByUuid(uuid) {
   const normalizedUuid = uuid.replace(/-/g, '');
   
-  const [rows] = await pool.execute(
-    `SELECT * FROM mc_profiles WHERE REPLACE(uuid, '-', '') = ? AND is_banned = 0 AND is_deleted = 0`,
-    [normalizedUuid]
-  );
+  const row = await getDbInstance()('mc_profiles')
+    .whereRaw("REPLACE(uuid, '-', '') = ?", [normalizedUuid])
+    .where({ is_banned: 0, is_deleted: 0 })
+    .first();
 
-  return rows[0] || null;
+  return row || null;
 }
 
 async function getProfileByName(playerName) {
-  const [rows] = await pool.execute(
-    `SELECT * FROM mc_profiles WHERE player_name = ? AND is_banned = 0 AND is_deleted = 0`,
-    [playerName]
-  );
+  const row = await getDbInstance()('mc_profiles')
+    .where({ player_name: playerName, is_banned: 0, is_deleted: 0 })
+    .first();
 
-  return rows[0] || null;
+  return row || null;
 }
 
 async function getProfilesByUserId(userId) {
-  const [rows] = await pool.execute(
-    `SELECT id, player_name, uuid, skin_url, cape_url, skin_model, is_banned, created_at, updated_at
-     FROM mc_profiles 
-     WHERE user_id = ? AND is_deleted = 0
-     ORDER BY created_at DESC`,
-    [userId]
-  );
+  const rows = await getDbInstance()('mc_profiles')
+    .select('id', 'player_name', 'uuid', 'skin_url', 'cape_url', 'skin_model', 'is_banned', 'created_at', 'updated_at')
+    .where({ user_id: userId, is_deleted: 0 })
+    .orderBy('created_at', 'desc');
 
   return rows;
 }
 
 async function getProfileById(profileId) {
-  const [rows] = await pool.execute(
-    `SELECT * FROM mc_profiles WHERE id = ?`,
-    [profileId]
-  );
+  const row = await getDbInstance()('mc_profiles')
+    .where({ id: profileId })
+    .first();
 
-  return rows[0] || null;
+  return row || null;
 }
 
 async function saveTokens(profileId, accessToken, refreshToken, clientToken, ipAddress = null, userAgent = null) {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const db = getDbInstance();
   
   // 检查该角色的令牌数量，超过 10 个则删除最旧的
   const MAX_TOKENS = 10;
-  const [countRows] = await pool.execute(
-    `SELECT COUNT(*) as count FROM yggdrasil_tokens WHERE profile_id = ? AND expires_at > NOW()`,
-    [profileId]
-  );
+  const countResult = await db('yggdrasil_tokens')
+    .where('profile_id', profileId)
+    .where('expires_at', '>', db.fn.now())
+    .count('* as count')
+    .first();
   
-  if (countRows[0].count >= MAX_TOKENS) {
+  const count = parseInt(countResult.count);
+  
+  if (count >= MAX_TOKENS) {
     // 删除最旧的令牌
-    const [oldTokens] = await pool.execute(
-      `SELECT id FROM yggdrasil_tokens WHERE profile_id = ? AND expires_at > NOW() ORDER BY created_at ASC LIMIT ?`,
-      [profileId, countRows[0].count - MAX_TOKENS + 1]
-    );
+    const oldTokens = await db('yggdrasil_tokens')
+      .select('id')
+      .where('profile_id', profileId)
+      .where('expires_at', '>', db.fn.now())
+      .orderBy('created_at', 'asc')
+      .limit(count - MAX_TOKENS + 1);
     
     if (oldTokens.length > 0) {
       const idsToDelete = oldTokens.map(t => t.id);
-      await pool.execute(
-        `DELETE FROM yggdrasil_tokens WHERE id IN (${idsToDelete.map(() => '?').join(',')})`,
-        idsToDelete
-      );
+      await db('yggdrasil_tokens').whereIn('id', idsToDelete).delete();
       console.log(`[Yggdrasil] 角色 ${profileId} 令牌数量超过限制，已删除 ${oldTokens.length} 个旧令牌`);
     }
   }
 
-  await pool.execute(
-    `INSERT INTO yggdrasil_tokens (profile_id, access_token, refresh_token, client_token, expires_at, ip_address, user_agent)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [profileId, accessToken, refreshToken, clientToken, expiresAt, ipAddress, userAgent]
-  );
+  await db('yggdrasil_tokens').insert({
+    profile_id: profileId,
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    client_token: clientToken,
+    expires_at: expiresAt,
+    ip_address: ipAddress,
+    user_agent: userAgent
+  });
 }
 
 async function findTokenByAccessToken(accessToken) {
-  const [rows] = await pool.execute(
-    `SELECT t.*, p.*
-     FROM yggdrasil_tokens t
-     JOIN mc_profiles p ON t.profile_id = p.id
-     WHERE t.access_token = ? AND t.expires_at > NOW()
-     ORDER BY t.created_at DESC
-     LIMIT 1`,
-    [accessToken]
-  );
+  const row = await getDbInstance()('yggdrasil_tokens as t')
+    .join('mc_profiles as p', 't.profile_id', 'p.id')
+    .where('t.access_token', accessToken)
+    .where('t.expires_at', '>', getDbInstance().fn.now())
+    .orderBy('t.created_at', 'desc')
+    .first();
 
-  return rows[0] || null;
+  return row || null;
 }
 
 async function findTokenByRefreshToken(refreshToken) {
-  const [rows] = await pool.execute(
-    `SELECT t.*, p.*
-     FROM yggdrasil_tokens t
-     JOIN mc_profiles p ON t.profile_id = p.id
-     WHERE t.refresh_token = ? AND t.expires_at > NOW()
-     LIMIT 1`,
-    [refreshToken]
-  );
+  const row = await getDbInstance()('yggdrasil_tokens as t')
+    .join('mc_profiles as p', 't.profile_id', 'p.id')
+    .where('t.refresh_token', refreshToken)
+    .where('t.expires_at', '>', getDbInstance().fn.now())
+    .first();
 
-  return rows[0] || null;
+  return row || null;
 }
 
 // 检查 Token 是否暂时失效（角色改名后）
 async function isTokenTemporarilyInvalidated(accessToken) {
-  const [rows] = await pool.execute(
-    `SELECT is_temporarily_invalidated FROM yggdrasil_tokens
-     WHERE access_token = ? AND expires_at > NOW()
-     LIMIT 1`,
-    [accessToken]
-  );
+  const row = await getDbInstance()('yggdrasil_tokens')
+    .select('is_temporarily_invalidated')
+    .where('access_token', accessToken)
+    .where('expires_at', '>', getDbInstance().fn.now())
+    .first();
 
-  return rows[0]?.is_temporarily_invalidated === 1;
+  return row?.is_temporarily_invalidated === 1;
 }
 
 // 将角色的所有 Token 标记为暂时失效（角色改名后调用）
 async function markTokensAsTemporarilyInvalidated(profileId) {
-  const [result] = await pool.execute(
-    `UPDATE yggdrasil_tokens 
-     SET is_temporarily_invalidated = 1 
-     WHERE profile_id = ? AND expires_at > NOW()`,
-    [profileId]
-  );
+  const result = await getDbInstance()('yggdrasil_tokens')
+    .where('profile_id', profileId)
+    .where('expires_at', '>', getDbInstance().fn.now())
+    .update({ is_temporarily_invalidated: 1 });
 
-  console.log(`[Yggdrasil] 角色 ${profileId} 的 ${result.affectedRows} 个 Token 被标记为暂时失效`);
-  return result.affectedRows;
+  console.log(`[Yggdrasil] 角色 ${profileId} 的 ${result} 个 Token 被标记为暂时失效`);
+  return result;
 }
 
 async function invalidateAllTokens(profileId) {
-  const [result] = await pool.execute(
-    `DELETE FROM yggdrasil_tokens WHERE profile_id = ?`,
-    [profileId]
-  );
+  const result = await getDbInstance()('yggdrasil_tokens')
+    .where('profile_id', profileId)
+    .delete();
 
-  return result.affectedRows;
+  return result;
 }
 
 async function invalidateToken(accessToken) {
-  const [result] = await pool.execute(
-    `DELETE FROM yggdrasil_tokens WHERE access_token = ?`,
-    [accessToken]
-  );
+  const result = await getDbInstance()('yggdrasil_tokens')
+    .where('access_token', accessToken)
+    .delete();
 
-  return result.affectedRows > 0;
+  return result > 0;
 }
 
 async function cleanupExpiredTokens() {
-  const [result] = await pool.execute(
-    `DELETE FROM yggdrasil_tokens WHERE expires_at < NOW()`
-  );
+  try {
+    const result = await getDbInstance()('yggdrasil_tokens')
+      .where('expires_at', '<', getDbInstance().fn.now())
+      .delete();
 
-  console.log(`清理了 ${result.affectedRows} 个过期Token`);
-  return result.affectedRows;
+    console.log(`清理了 ${result} 个过期Token`);
+    return result;
+  } catch (error) {
+    console.error('[Yggdrasil] 初始清理过期 Token 失败:', error.message);
+    return 0;
+  }
 }
 
 function buildAuthResponse(profile, accessToken, clientToken) {
@@ -423,26 +421,22 @@ function buildErrorResponse(errorType, errorMessage) {
 }
 
 async function recordExists(table, column, value) {
-  const [rows] = await pool.execute(
-    `SELECT 1 FROM \`${table}\` WHERE \`${column}\` = ? LIMIT 1`,
-    [value]
-  );
-  return rows.length > 0;
+  const row = await getDbInstance()(table)
+    .where(column, value)
+    .first(1);
+  
+  return !!row;
 }
 
 async function isUnique(table, column, value, excludeId = null) {
-  let sql = `SELECT 1 FROM \`${table}\` WHERE \`${column}\` = ?`;
-  const params = [value];
+  let query = getDbInstance()(table).where(column, value);
 
   if (excludeId) {
-    sql += ' AND id != ?';
-    params.push(excludeId);
+    query = query.whereNot('id', excludeId);
   }
 
-  sql += ' LIMIT 1';
-
-  const [rows] = await pool.execute(sql, params);
-  return rows.length === 0;
+  const row = await query.first(1);
+  return !row;
 }
 
 module.exports = {

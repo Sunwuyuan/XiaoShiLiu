@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { pool } = require('../config/config');
+const { getDB } = require('../utils/db');
 const { success, error } = require('../utils/responseHelper');
 
 /**
@@ -34,6 +34,7 @@ const { success, error } = require('../utils/responseHelper');
  */
 router.get('/', async (req, res) => {
   try {
+    const db = getDB();
     const { sortField = 'id', sortOrder = 'asc', name, category_title } = req.query;
 
     const allowedSortFields = {
@@ -43,40 +44,34 @@ router.get('/', async (req, res) => {
       'post_count': 'post_count'
     };
     const allowedSortOrders = {
-      'asc': 'ASC',
-      'desc': 'DESC'
+      'asc': 'asc',
+      'desc': 'desc'
     };
     const validSortField = allowedSortFields[sortField] || allowedSortFields['id'];
     const validSortOrder = allowedSortOrders[sortOrder?.toLowerCase()] || allowedSortOrders['asc'];
 
-    // 构建WHERE条件
-    const queryParams = [];
-    const conditions = [];
+    // 构建查询
+    let query = db({ c: 'categories' })
+      .leftJoin({ p: 'posts' }, 'c.id', 'p.category_id')
+      .select(
+        'c.id',
+        'c.name',
+        'c.category_title',
+        'c.created_at'
+      )
+      .count('p.id as post_count')
+      .groupBy('c.id', 'c.name', 'c.category_title', 'c.created_at')
+      .orderByRaw(`${validSortField} ${validSortOrder}`);
 
     if (name && typeof name === 'string' && name.trim()) {
-      conditions.push('c.name LIKE ?');
-      queryParams.push(`%${name.trim()}%`);
+      query.where('c.name', 'like', `%${name.trim()}%`);
     }
 
     if (category_title && typeof category_title === 'string' && category_title.trim()) {
-      conditions.push('c.category_title LIKE ?');
-      queryParams.push(`%${category_title.trim()}%`);
+      query.where('c.category_title', 'like', `%${category_title.trim()}%`);
     }
 
-    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
-    const [categories] = await pool.execute(`
-      SELECT 
-        c.id, 
-        c.name, 
-        c.category_title,
-        c.created_at,
-        COUNT(p.id) as post_count
-      FROM categories c
-      LEFT JOIN posts p ON c.id = p.category_id
-      ${whereClause}
-      GROUP BY c.id, c.name, c.category_title, c.created_at
-      ORDER BY ${validSortField} ${validSortOrder}
-    `, queryParams)
+    const categories = await query;
 
     success(res, categories, '获取成功');
   } catch (err) {

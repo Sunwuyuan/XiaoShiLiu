@@ -17,7 +17,7 @@ if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf8');
 
   // 检查必需的环境变量
-  const requiredVars = ['JWT_SECRET', 'DB_HOST', 'DB_NAME'];
+  const requiredVars = ['JWT_SECRET', 'PG_HOST', 'PG_DATABASE'];
 
   for (const varName of requiredVars) {
     const regex = new RegExp(`^${varName}=(.+)`, 'm');
