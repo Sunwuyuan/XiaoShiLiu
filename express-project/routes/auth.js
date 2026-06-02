@@ -45,10 +45,30 @@ function isValidEmail(email) {
   return true;
 }
 
-// 存储验证码的临时对象
+// 存储验证码的临时对象（最大容量限制，防止内存泄漏）
+const MAX_STORE_SIZE = 10000;
 const captchaStore = new Map();
-// 存储邮箱验证码的临时对象
+// 存储邮箱验证码的临时对象（最大容量限制，防止内存泄漏）
 const emailCodeStore = new Map();
+
+/**
+ * 清理过期条目并在超过容量时移除最旧的
+ * @param {Map} store - 目标Map
+ * @param {number} maxSize - 最大容量
+ */
+function cleanupAndTrimStore(store, maxSize) {
+  // 清理过期的验证码
+  for (const [key, value] of store.entries()) {
+    if (Date.now() > value.expires) {
+      store.delete(key);
+    }
+  }
+  // 超出容量时删除最旧的一半条目
+  if (store.size > maxSize) {
+    const entriesToRemove = Array.from(store.keys()).slice(0, Math.floor(maxSize / 2));
+    entriesToRemove.forEach(key => store.delete(key));
+  }
+}
 
 // 获取邮件功能配置状态
 router.get('/email-config', (req, res) => {
@@ -98,12 +118,8 @@ router.get('/captcha', (req, res) => {
       expires: Date.now() + 30 * 1000 // 半分钟过期
     });
 
-    // 清理过期的验证码
-    for (const [key, value] of captchaStore.entries()) {
-      if (Date.now() > value.expires) {
-        captchaStore.delete(key);
-      }
-    }
+    // 清理过期的验证码并限制容量
+    cleanupAndTrimStore(captchaStore, MAX_STORE_SIZE);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -181,12 +197,8 @@ router.post('/send-email-code', async (req, res) => {
       expires
     });
 
-    // 清理过期的验证码
-    for (const [key, value] of emailCodeStore.entries()) {
-      if (Date.now() > value.expires) {
-        emailCodeStore.delete(key);
-      }
-    }
+    // 清理过期的验证码并限制容量
+    cleanupAndTrimStore(emailCodeStore, MAX_STORE_SIZE);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -303,12 +315,8 @@ router.post('/send-reset-code', async (req, res) => {
       userId: existingUser[0].id
     });
 
-    // 清理过期的验证码
-    for (const [key, value] of emailCodeStore.entries()) {
-      if (Date.now() > value.expires) {
-        emailCodeStore.delete(key);
-      }
-    }
+    // 清理过期的验证码并限制容量
+    cleanupAndTrimStore(emailCodeStore, MAX_STORE_SIZE);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,

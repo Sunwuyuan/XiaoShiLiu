@@ -115,10 +115,12 @@ const sanitizeContent = (content) => {
   })
 
   // 4. 保护安全的<img>标签（允许http/https协议和本地相对路径）
+  // 危险标签将被转义而非保留，防止XSS绕过
   const imgTags = []
   processedContent = processedContent.replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, (match, src) => {
+    // 检测危险属性和协议：发现危险内容时返回转义后的文本，不再保留原始HTML
     if (/\son\w+\s*=/i.test(match) || /javascript\s*:/i.test(match)) {
-      return match
+      return escapeHtml(match)
     }
 
     // 验证URL是否安全：允许http/https绝对路径和/api/开头的相对路径

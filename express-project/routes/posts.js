@@ -7,6 +7,61 @@ const NotificationHelper = require('../utils/notificationHelper');
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser');
 const { batchCleanupFiles } = require('../utils/fileCleanup');
 const { sanitizeContent } = require('../utils/contentSecurity');
+const sharp = require('sharp');
+const crypto = require('crypto');
+
+/**
+ * 从视频缓冲区提取封面缩略图
+ * 使用 sharp 生成默认视频封面（因视频帧提取需要 ffmpeg，此处生成占位图）
+ * @param {Buffer} buffer - 视频文件缓冲区
+ * @param {string} filename - 原始文件名
+ * @returns {Promise<{success: boolean, coverUrl?: string}>}
+ */
+async function extractVideoThumbnail(buffer, filename) {
+  try {
+    // 使用 sharp 生成一个带"VIDEO"文字的默认封面图作为占位
+    const svgBuffer = Buffer.from(`
+      <svg width="640" height="360" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100%" height="100%" fill="#1a1a2e"/>
+        <polygon points="280,120 280,240 380,180" fill="#e94560"/>
+        <text x="320" y="300" font-family="Arial" font-size="16" fill="#888" text-anchor="middle">Video</text>
+      </svg>
+    `);
+    const thumbnailBuffer = await sharp(svgBuffer)
+      .resize(640, 360)
+      .jpeg({ quality: 80 })
+      .toBuffer();
+
+    // 上传封面到文件存储
+    const config = require('../config/config');
+    const fileHelper = require('../utils/fileHelper');
+    const ext = '.jpg';
+    const timestamp = Date.now();
+    const randomStr = crypto.randomBytes(4).toString('hex');
+    const thumbFilename = `video_cover_${timestamp}_${randomStr}${ext}`;
+
+    let coverUrl;
+    if (config.storage.type === 'local') {
+      const fs = require('fs');
+      const path = require('path');
+      const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'covers');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const filePath = path.join(uploadDir, thumbFilename);
+      fs.writeFileSync(filePath, thumbnailBuffer);
+      coverUrl = `/uploads/covers/${thumbFilename}`;
+    } else {
+      // 其他存储方式（R2/S3/图床）
+      coverUrl = await fileHelper.uploadFile(thumbnailBuffer, thumbFilename, 'image/jpeg', 'covers');
+    }
+
+    return { success: true, coverUrl };
+  } catch (error) {
+    console.error('生成视频封面失败:', error);
+    return { success: false };
+  }
+}
 
 // 辅助函数：获取笔记的附加信息
 async function enrichPostsWithDetails(db, rows, currentUserId) {
@@ -334,11 +389,15 @@ router.get('/:id', optionalAuth, async (req, res) => {
       post.collected = false;
     }
 
-    // 增加浏览量
+    // 增加浏览量（使用原子操作避免竞态条件）
     const skipViewCount = req.query.skipViewCount === 'true';
     if (!skipViewCount) {
       await db('posts').where({ id: postId }).increment('view_count', 1);
-      post.view_count += 1;
+      // 使用数据库实际值而非内存中的旧值+1，避免高并发时不一致
+      const updatedPost = await db('posts').where({ id: postId }).select('view_count').first();
+      if (updatedPost) {
+        post.view_count = parseInt(updatedPost.view_count);
+      }
     }
 
     res.json({

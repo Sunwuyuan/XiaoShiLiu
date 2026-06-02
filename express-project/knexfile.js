@@ -40,7 +40,10 @@ const getConfig = () => {
         host: process.env.PG_HOST || process.env.DB_HOST || 'localhost',
         port: parseInt(process.env.PG_PORT || process.env.DB_PORT) || 5432,
         user: process.env.PG_USER || process.env.DB_USER || 'postgres',
-        password: process.env.PG_PASSWORD || process.env.DB_PASSWORD || '123456',
+        password: process.env.PG_PASSWORD || process.env.DB_PASSWORD || (() => {
+          console.warn('⚠️  警告: 未设置数据库密码环境变量 (PG_PASSWORD/DB_PASSWORD)，请在 .env 文件中配置');
+          return '';
+        })(),
         database: process.env.PG_DATABASE || process.env.DB_NAME || 'xiaoshiliu'
       },
       pool: { min: 2, max: 10 }

@@ -43,6 +43,9 @@ const {
 } = require('../utils/yggdrasilHelper');
 
 // 内存存储用于serverId验证（生产环境建议使用Redis）
+// 设置最大容量和过期时间，防止内存泄漏
+const MAX_SERVER_ID_CACHE_SIZE = 5000;
+const SERVER_ID_CACHE_TTL = 30000; // 30秒
 const serverIdCache = new Map();
 
 // 代理 URL 函数：直接返回原始 URL（不再走代理）
@@ -387,18 +390,38 @@ router.post('/sessionserver/session/minecraft/join', async (req, res) => {
     }
 
     const cacheKey = serverId;
+    const expireAt = Date.now() + SERVER_ID_CACHE_TTL;
+
+    // 容量超限时清理过期和最旧的条目
+    if (serverIdCache.size >= MAX_SERVER_ID_CACHE_SIZE) {
+      const now = Date.now();
+      // 先清理已过期的
+      for (const [key, val] of serverIdCache.entries()) {
+        if (now > val.expireAt) {
+          serverIdCache.delete(key);
+        }
+      }
+      // 仍超出则删除最旧的一半
+      if (serverIdCache.size >= MAX_SERVER_ID_CACHE_SIZE) {
+        const keysToRemove = Array.from(serverIdCache.keys()).slice(0, Math.floor(MAX_SERVER_ID_CACHE_SIZE / 2));
+        keysToRemove.forEach(key => serverIdCache.delete(key));
+      }
+    }
+
     serverIdCache.set(cacheKey, {
       accessToken: accessToken,
       profileId: tokenRecord.profile_id,
       playerName: tokenRecord.player_name,
       uuid: tokenRecord.uuid,
       ip: req.ip,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      expireAt: expireAt
     });
 
+    // 使用setTimeout自动清理（保留原有逻辑，但增加容量保护）
     setTimeout(() => {
       serverIdCache.delete(cacheKey);
-    }, 30000);
+    }, SERVER_ID_CACHE_TTL);
 
     res.status(204).end();
 
@@ -421,7 +444,9 @@ router.get('/sessionserver/session/minecraft/hasJoined', async (req, res) => {
 
     const cacheEntry = serverIdCache.get(serverId);
 
-    if (!cacheEntry) {
+    if (!cacheEntry || Date.now() > cacheEntry.expireAt) {
+      // 缓存不存在或已过期，删除并返回
+      if (cacheEntry) serverIdCache.delete(serverId);
       return res.status(204).end();
     }
 

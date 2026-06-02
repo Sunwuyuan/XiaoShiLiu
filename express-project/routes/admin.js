@@ -684,7 +684,6 @@ router.get('/posts-audit', adminAuth, requirePermission('post_audit:view'), asyn
 
     const validSortField = allowedSortFields[req.query.sortField] || 'p.created_at'
     const validSortOrder = allowedSortOrders[req.query.sortOrder?.toLowerCase()] || 'DESC'
-    const orderClause = `ORDER BY ${validSortField} ${validSortOrder}`
 
     // 获取数据
     let dataQuery = db({ p: 'posts' })
@@ -2843,7 +2842,6 @@ router.delete('/audit', adminAuth, requirePermission('audit:delete'), auditHandl
 router.put('/audit/:id/approve', adminAuth, requirePermission('audit:audit'), async (req, res) => {
   try {
     const { id } = req.params
-    const { remark } = req.body
     const adminId = req.user.id
 
     // 获取认证记录信息
@@ -2905,7 +2903,6 @@ router.put('/audit/:id/approve', adminAuth, requirePermission('audit:audit'), as
 router.put('/audit/:id/reject', adminAuth, requirePermission('audit:audit'), async (req, res) => {
   try {
     const { id } = req.params
-    const { remark } = req.body
     const adminId = req.user.id
 
     // 获取认证记录信息

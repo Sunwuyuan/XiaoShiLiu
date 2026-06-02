@@ -343,10 +343,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const deletedCount = await deleteCommentRecursive(db, commentId);
 
     // 根据实际删除的评论数量更新笔记的评论计数
+    // 使用参数化方式防止SQL注入（deletedCount为内部计数，但仍做校验）
+    const safeDeletedCount = Math.max(0, parseInt(deletedCount) || 0);
     await db('posts')
       .where({ id: commentRecord.post_id })
       .update({
-        comment_count: db.raw(`GREATEST(comment_count - ${deletedCount}, 0)`)
+        comment_count: db.raw('GREATEST(comment_count - ?, 0)', [safeDeletedCount])
       });
 
     console.log('删除评论成功 - 用户ID: %s, 评论ID: %s', userId, commentId);

@@ -281,15 +281,17 @@ function createCrudHandlers(config) {
         }
       }
 
-      // 排序处理
+      // 排序处理（防止SQL注入：严格校验字段名和排序方向）
       let orderBy = defaultOrderBy
       if (req.query.sortField && req.query.sortOrder) {
         const allowedSortFields = config.allowedSortFields || ['id', 'created_at']
+        // 只允许字母、数字、下划线组成的字段名，防止注入
         const sortField = req.query.sortField
+        const safeSortField = /^[a-zA-Z0-9_]+$/.test(sortField) ? sortField : null
         const sortOrder = req.query.sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
 
-        if (allowedSortFields.includes(sortField)) {
-          orderBy = `${sortField} ${sortOrder}`
+        if (safeSortField && allowedSortFields.includes(safeSortField)) {
+          orderBy = `${safeSortField} ${sortOrder}`
         }
       }
 

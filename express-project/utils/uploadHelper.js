@@ -185,8 +185,9 @@ async function uploadToImageHost(fileBuffer, filename, mimetype) {
         'Content-Length': formDataBody.length
       },
       timeout: config.upload.image.imagehost.timeout,
+      // 生产环境默认验证SSL证书，可通过环境变量 IMAGEHOST_SKIP_SSL_VERIFY=true 跳过
       httpsAgent: new https.Agent({
-        rejectUnauthorized: false
+        rejectUnauthorized: process.env.IMAGEHOST_SKIP_SSL_VERIFY === 'true' ? false : true
       })
     });
 

@@ -19,7 +19,11 @@ const getDbInstance = () => {
   return dbInstance;
 };
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  console.error('警告: YGGDRASIL JWT_SECRET 环境变量未设置，将使用随机生成的密钥（每次重启都会改变，导致所有Token失效）');
+  console.error('请在 .env 文件中设置固定的 JWT_SECRET');
+  return crypto.randomBytes(32).toString('hex');
+})();
 
 // RSA 签名密钥路径（优先从 .env 读取，兼容旧配置）
 const PRIVATE_KEY_PATH = process.env.YGGDRASIL_PRIVATE_KEY_PATH
