@@ -152,7 +152,8 @@ async function findOrCreateUser(logtoUser, req) {
     }
     
     const userId = 'l' + Date.now().toString(36);
-    const result = await db('users').insert({
+    // 使用 returning('*') 获取插入的完整行（PostgreSQL 兼容，避免 result[0] 为 undefined）
+    const newUsers = await db('users').insert({
       logto_id: logtoId,
       user_id: userId.slice(0, 15),
       nickname: nickname,
@@ -162,15 +163,13 @@ async function findOrCreateUser(logtoUser, req) {
       location: ipLocation,
       last_login_at: db.fn.now(),
       created_at: db.fn.now()
-    });
+    }).returning('*');
     
     console.log('新用户创建成功:', {
-      databaseId: result[0],
+      databaseId: newUsers[0]?.id,
       userId: userId.slice(0, 15),
       nickname
     });
-    
-    const newUsers = await db('users').where({ id: result[0] }).select('*');
     
     return newUsers[0];
   } else {
@@ -188,7 +187,8 @@ async function findOrCreateUser(logtoUser, req) {
     
     const db = getDB();
     const userId = 'l' + Date.now().toString(36);
-    const result = await db('users').insert({
+    // 使用 returning('*') 获取插入的完整行（PostgreSQL 兼容）
+    const newUsers = await db('users').insert({
       user_id: userId.slice(0, 15),
       nickname: nickname,
       avatar: avatar,
@@ -197,9 +197,7 @@ async function findOrCreateUser(logtoUser, req) {
       location: ipLocation,
       last_login_at: db.fn.now(),
       created_at: db.fn.now()
-    });
-    
-    const newUsers = await db('users').where({ id: result[0] }).select('*');
+    }).returning('*');
     
     return newUsers[0];
   }
