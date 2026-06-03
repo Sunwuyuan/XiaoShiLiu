@@ -1,41 +1,30 @@
--- 小石榴图文社区 - 添加 Logto 支持的数据库迁移脚本
-
-USE `xiaoshiliu`;
+-- 小石榴图文社区 - 添加 Logto 支持的数据库迁移脚本 (PostgreSQL版本)
 
 -- 为 users 表添加 logto_id 字段（检查列是否存在）
-SET @column_exists = (
-  SELECT COUNT(*)
-  FROM INFORMATION_SCHEMA.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE()
-    AND TABLE_NAME = 'users'
-    AND COLUMN_NAME = 'logto_id'
-);
-
--- 如果列不存在则添加
-SET @sql = IF(@column_exists = 0,
-  'ALTER TABLE `users` ADD COLUMN `logto_id` VARCHAR(128) DEFAULT NULL COMMENT \'Logto 用户唯一标识符\' AFTER `id`',
-  'SELECT \'Column logto_id already exists\' AS message'
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'logto_id'
+    ) THEN
+        ALTER TABLE users ADD COLUMN logto_id VARCHAR(128) DEFAULT NULL;
+        COMMENT ON COLUMN users.logto_id IS 'Logto 用户唯一标识符';
+        RAISE NOTICE '✅ logto_id 列已添加';
+    ELSE
+        RAISE NOTICE 'ℹ️ logto_id 列已存在，跳过';
+    END IF;
+END $$;
 
 -- 为 logto_id 添加唯一索引（检查索引是否存在）
-SET @index_exists = (
-  SELECT COUNT(*)
-  FROM INFORMATION_SCHEMA.STATISTICS
-  WHERE TABLE_SCHEMA = DATABASE()
-    AND TABLE_NAME = 'users'
-    AND INDEX_NAME = 'idx_logto_id'
-);
-
--- 如果索引不存在则添加
-SET @sql = IF(@index_exists = 0,
-  'ALTER TABLE `users` ADD UNIQUE KEY `idx_logto_id` (`logto_id`)',
-  'SELECT \'Index idx_logto_id already exists\' AS message'
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE tablename = 'users' AND indexname = 'idx_logto_id'
+    ) THEN
+        CREATE UNIQUE INDEX idx_logto_id ON users(logto_id) WHERE logto_id IS NOT NULL;
+        RAISE NOTICE '✅ logto_id 唯一索引已添加';
+    ELSE
+        RAISE NOTICE 'ℹ️ logto_id 索引已存在，跳过';
+    END IF;
+END $$;

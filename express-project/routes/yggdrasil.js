@@ -232,7 +232,7 @@ router.post('/authserver/refresh', async (req, res) => {
         access_token: newAccessToken,
         refresh_token: newRefreshToken,
         client_token: finalClientToken,
-        expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'")
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       });
 
     let response = {

@@ -217,12 +217,17 @@ router.get('/', optionalAuth, async (req, res) => {
 
     // 特殊处理推荐频道
     if (category === 'recommend') {
-      // 推荐算法：70%热度+30%新鲜度评分
+      // 推荐算法：70%热度+30%新鲜度评分（兼容 PostgreSQL 和 MySQL）
       const totalCount = await db('posts').where({ status }).count('* as total').first();
       const totalPosts = parseInt(totalCount.total);
       const recommendLimit = Math.ceil(totalPosts * 0.2);
 
-      const scoreExpr = db.raw('(view_count * 0.7 + LEAST(24, EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 3600) * 0.3)');
+      // PostgreSQL 使用 EXTRACT(EPOCH FROM ...)，MySQL 使用 TIMESTAMPDIFF
+      const dbClient = getDB().client?.config?.client || 'mysql';
+      const hoursDiffExpr = dbClient === 'pg'
+        ? "LEAST(24, EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 3600)"
+        : "LEAST(24, TIMESTAMPDIFF(HOUR, p.created_at, NOW()))";
+      const scoreExpr = db.raw(`(view_count * 0.7 + ${hoursDiffExpr} * 0.3)`);
 
       query = db({ p: 'posts' })
         .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')

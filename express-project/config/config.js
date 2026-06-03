@@ -22,8 +22,10 @@ try {
     // 检查是否包含JWT_SECRET
     if (envContent.includes('JWT_SECRET')) {
       const jwtMatch = envContent.match(/JWT_SECRET=(.+)/);
-      if (jwtMatch) {
-        console.log('JWT_SECRET已设置，长度:', jwtMatch[1].length);
+      if (jwtMatch && jwtMatch[1].trim()) {
+        console.log('JWT_SECRET已设置，长度:', jwtMatch[1].trim().length);
+      } else {
+        console.log('警告: JWT_SECRET 为空，请设置固定值');
       }
     } else {
       console.log('警告: .env文件中不包含JWT_SECRET');
@@ -68,7 +70,7 @@ const config = {
 
   // 数据库配置（由 knexfile.js 管理）
   database: {
-    type: process.env.DB_TYPE || (process.env.NODE_ENV === 'production' ? 'pg' : 'sqlite3')
+    type: process.env.DB_TYPE || 'pg'
   },
 
   // 上传配置

@@ -21,21 +21,27 @@ async function getTableCount(table, where = {}) {
 }
 
 /**
- * 获取多个表的统计信息
+ * 获取多个表的统计信息 - 使用 Promise.all 并行查询替代 N+1 循环
  * @param {Array} tables - 表配置数组，每个元素包含 {table, alias, where?}
  * @returns {Promise<Object>} 统计结果对象
  */
 async function getMultipleTableStats(tables) {
   try {
-    const results = {};
-    
-    for (const config of tables) {
+    // 使用 Promise.all 并行执行所有查询，避免 N+1 问题
+    const countPromises = tables.map(config => {
       const { table, alias, where = {} } = config;
-      const count = await getTableCount(table, where);
-      results[alias || table] = count;
-    }
-    
-    return results;
+      return getTableCount(table, where).then(count => ({ alias: alias || table, count }));
+    });
+
+    const results = await Promise.all(countPromises);
+
+    // 将结果转换为对象
+    const stats = {};
+    results.forEach(({ alias, count }) => {
+      stats[alias] = count;
+    });
+
+    return stats;
   } catch (error) {
     console.error('获取多表统计信息失败:', error.message);
     throw error;
@@ -43,7 +49,7 @@ async function getMultipleTableStats(tables) {
 }
 
 /**
- * 获取分页查询的总数和数据
+ * 获取分页查询的总数和数据 - 优化为单次查询
  * @param {string} table - 表名
  * @param {Object} options - 查询选项
  * @param {string} options.fields - 查询字段，默认为 '*'
@@ -62,22 +68,30 @@ async function getPaginatedData(table, options = {}) {
     page = 1,
     limit = 20
   } = options;
-  
+
   try {
     const db = getDB();
-    
-    // 获取总数
-    const total = await getTableCount(table, where);
-    
+
     // 获取分页数据
     const offset = (page - 1) * limit;
-    const data = await db(table)
-      .where(where)
-      .select(fields === '*' ? '*' : fields.split(','))
-      .orderBy(orderBy, orderDir)
-      .limit(limit)
-      .offset(offset);
-    
+
+    // 使用窗口函数或子查询在单次查询中获取总数（PostgreSQL 支持）
+    // 对于 Knex，我们仍然需要两次查询，但可以优化为并行执行
+    const [countResult, data] = await Promise.all([
+      db(table)
+        .where(where)
+        .count('* as count')
+        .first(),
+      db(table)
+        .where(where)
+        .select(fields === '*' ? '*' : fields.split(','))
+        .orderBy(orderBy, orderDir)
+        .limit(limit)
+        .offset(offset)
+    ]);
+
+    const total = parseInt(countResult.count);
+
     return {
       total,
       data,

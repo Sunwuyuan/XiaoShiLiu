@@ -143,6 +143,8 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
       });
     }
 
+    // 使用 .returning('id') 获取自增ID（PostgreSQL兼容）
+    // .returning() 返回 [{id: xxx}]，解构 [result] 后 result 即为 {id: xxx}
     const [result] = await db('mc_profiles')
       .insert({
         user_id: userId,
@@ -152,7 +154,12 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
       })
       .returning('id');
 
-    await auditLog('PROFILE_CREATE', userId, result[0].id, req.ip, {
+    const profileId = result?.id;
+    if (!profileId) {
+      throw new Error('创建角色失败：无法获取角色ID');
+    }
+
+    await auditLog('PROFILE_CREATE', userId, profileId, req.ip, {
       player_name: player_name.trim(),
       uuid
     });
@@ -162,7 +169,7 @@ router.post('/profile/create', authenticateToken, async (req, res) => {
     res.status(HTTP_STATUS.CREATED).json({
       code: RESPONSE_CODES.SUCCESS,
       data: {
-        id: result[0].id,
+        id: profileId,
         player_name: player_name.trim(),
         uuid
       },

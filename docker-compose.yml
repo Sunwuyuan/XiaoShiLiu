@@ -1,64 +1,52 @@
-name: xiaoshiliu
+name: xsl
 services:
-  # MySQL数据库服务
-  mysql:
-    image: mysql:8.0
-    container_name: xiaoshiliu-mysql
+  postgres:
+    image: postgres:15-alpine
+    container_name: xsl-pg
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: 123456
-      MYSQL_DATABASE: xiaoshiliu
-      MYSQL_USER: root
-      MYSQL_PASSWORD: 123456
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: xiaoshiliu
       TZ: Asia/Shanghai
-    ports:
-      - "3307:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./express-project/scripts/init-database.sql:/docker-entrypoint-initdb.d/init.sql
+      - pg_data:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     networks:
-      - xiaoshiliu-network
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      - xsl-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xiaoshiliu"]
       timeout: 20s
       retries: 10
 
-  # 后端API服务
   backend:
     build:
       context: ./express-project
       dockerfile: Dockerfile
-    container_name: xiaoshiliu-backend
+    container_name: xsl-backend
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
+      NODE_ENV: development
     ports:
       - "3013:3013"
     volumes:
+      - ./express-project:/app
+      - /app/node_modules
       - backend_uploads:/app/uploads
       - /etc/localtime:/etc/localtime:ro
       - ./.env:/app/.env:ro
       - ./express-project/keys:/app/keys:ro
     networks:
-      - xiaoshiliu-network
+      - xsl-network
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    command: ["npx","nodemon","app.js"]
 
 volumes:
-  mysql_data:
-    driver: local
+  pg_data:
   backend_uploads:
-    driver: local
-networks:
-  xiaoshiliu-network:
-    driver: bridge
 
+networks:
+  xsl-network:

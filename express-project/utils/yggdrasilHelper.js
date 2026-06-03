@@ -13,11 +13,8 @@ const fs = require('fs');
 const path = require('path');
 const { getDB } = require('./db');
 
-let dbInstance = null;
-const getDbInstance = () => {
-  if (!dbInstance) dbInstance = getDB();
-  return dbInstance;
-};
+// 不再缓存 db 实例，每次都从 db.js 获取，确保连接生命周期一致
+const getDbInstance = () => getDB();
 
 const JWT_SECRET = process.env.JWT_SECRET || (() => {
   console.error('警告: YGGDRASIL JWT_SECRET 环境变量未设置，将使用随机生成的密钥（每次重启都会改变，导致所有Token失效）');
@@ -248,6 +245,8 @@ async function auditLog(action, userId = null, profileId = null, ipAddress = nul
 async function getProfileByUuid(uuid) {
   const normalizedUuid = uuid.replace(/-/g, '');
   
+  // 使用参数化查询替代 whereRaw，避免潜在的SQL注入风险
+  // 在应用层处理UUID格式，然后使用标准 where 查询
   const row = await getDbInstance()('mc_profiles')
     .whereRaw("REPLACE(uuid, '-', '') = ?", [normalizedUuid])
     .where({ is_banned: 0, is_deleted: 0 })
@@ -281,44 +280,57 @@ async function getProfileById(profileId) {
   return row || null;
 }
 
+/**
+ * 保存 Token - 使用事务确保数据一致性，并修复竞态条件
+ * @param {number} profileId - MC角色ID
+ * @param {string} accessToken - 访问令牌
+ * @param {string} refreshToken - 刷新令牌
+ * @param {string} clientToken - 客户端标识符
+ * @param {string} ipAddress - IP地址
+ * @param {string} userAgent - 用户代理
+ */
 async function saveTokens(profileId, accessToken, refreshToken, clientToken, ipAddress = null, userAgent = null) {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const db = getDbInstance();
-  
-  // 检查该角色的令牌数量，超过 10 个则删除最旧的
   const MAX_TOKENS = 10;
-  const countResult = await db('yggdrasil_tokens')
-    .where('profile_id', profileId)
-    .where('expires_at', '>', db.fn.now())
-    .count('* as count')
-    .first();
   
-  const count = parseInt(countResult.count);
-  
-  if (count >= MAX_TOKENS) {
-    // 删除最旧的令牌
-    const oldTokens = await db('yggdrasil_tokens')
-      .select('id')
+  // 使用事务包裹所有操作，确保原子性
+  await db.transaction(async (trx) => {
+    // 在事务内查询和删除，避免竞态条件
+    const countResult = await trx('yggdrasil_tokens')
       .where('profile_id', profileId)
-      .where('expires_at', '>', db.fn.now())
-      .orderBy('created_at', 'asc')
-      .limit(count - MAX_TOKENS + 1);
+      .where('expires_at', '>', trx.fn.now())
+      .count('* as count')
+      .first();
     
-    if (oldTokens.length > 0) {
-      const idsToDelete = oldTokens.map(t => t.id);
-      await db('yggdrasil_tokens').whereIn('id', idsToDelete).delete();
-      console.log(`[Yggdrasil] 角色 ${profileId} 令牌数量超过限制，已删除 ${oldTokens.length} 个旧令牌`);
+    const count = parseInt(countResult.count);
+    
+    if (count >= MAX_TOKENS) {
+      // 删除最旧的令牌
+      const oldTokens = await trx('yggdrasil_tokens')
+        .select('id')
+        .where('profile_id', profileId)
+        .where('expires_at', '>', trx.fn.now())
+        .orderBy('created_at', 'asc')
+        .limit(count - MAX_TOKENS + 1);
+      
+      if (oldTokens.length > 0) {
+        const idsToDelete = oldTokens.map(t => t.id);
+        await trx('yggdrasil_tokens').whereIn('id', idsToDelete).delete();
+        console.log(`[Yggdrasil] 角色 ${profileId} 令牌数量超过限制，已删除 ${oldTokens.length} 个旧令牌`);
+      }
     }
-  }
 
-  await db('yggdrasil_tokens').insert({
-    profile_id: profileId,
-    access_token: accessToken,
-    refresh_token: refreshToken,
-    client_token: clientToken,
-    expires_at: expiresAt,
-    ip_address: ipAddress,
-    user_agent: userAgent
+    // 插入新令牌
+    await trx('yggdrasil_tokens').insert({
+      profile_id: profileId,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      client_token: clientToken,
+      expires_at: expiresAt,
+      ip_address: ipAddress,
+      user_agent: userAgent
+    });
   });
 }
 

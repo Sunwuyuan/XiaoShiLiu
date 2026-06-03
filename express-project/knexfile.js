@@ -2,7 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
-let DB_TYPE = process.env.DB_TYPE || (NODE_ENV === 'production' ? 'pg' : 'pg');
+let DB_TYPE = process.env.DB_TYPE || 'pg';
 
 if (DB_TYPE === 'sqlite' || DB_TYPE === 'sqlite3') {
   console.warn('⚠️  警告: SQLite 在 Windows 上可能需要编译环境，建议使用 PostgreSQL');

@@ -5,12 +5,19 @@ exports.seed = async function(knex) {
 
   const hashedPassword = await bcrypt.hash('123456', 10);
 
-  await knex('admin').insert([
-    {
-      username: 'admin',
-      password: hashedPassword,
-      is_super: true,
-      nickname: '超级管理员'
-    }
-  ]);
+  // 检查 password 列是否存在（兼容迁移07删除password后的情况）
+  const hasPasswordColumn = await knex.schema.hasColumn('admin', 'password');
+
+  const adminData = {
+    username: 'admin',
+    is_super: true,
+    nickname: '超级管理员'
+  };
+
+  // 如果 password 列存在，则添加密码
+  if (hasPasswordColumn) {
+    adminData.password = hashedPassword;
+  }
+
+  await knex('admin').insert([adminData]);
 };

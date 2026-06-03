@@ -1,5 +1,58 @@
 const { getDB } = require('./db');
 
+/**
+ * 安全排序字段白名单
+ * 防止SQL注入，只允许预定义的排序字段
+ */
+const ALLOWED_ORDER_FIELDS = {
+  'created_at': 'created_at',
+  'updated_at': 'updated_at',
+  'id': 'id',
+  'name': 'name',
+  'title': 'title',
+  'username': 'username',
+  'nickname': 'nickname',
+  'email': 'email',
+  'like_count': 'like_count',
+  'view_count': 'view_count',
+  'comment_count': 'comment_count',
+  'collect_count': 'collect_count',
+  'follow_count': 'follow_count',
+  'fans_count': 'fans_count',
+  'use_count': 'use_count',
+  'player_name': 'player_name',
+  'expires_at': 'expires_at',
+  'status': 'status',
+  'sort_order': 'sort_order'
+};
+
+/**
+ * 验证并构建安全的排序字符串
+ * @param {string} orderBy - 原始排序字符串，如 "created_at DESC" 或 "name ASC"
+ * @returns {Object} - { column: string, direction: string }
+ */
+function parseSafeOrderBy(orderBy) {
+  if (!orderBy || typeof orderBy !== 'string') {
+    return { column: 'created_at', direction: 'DESC' };
+  }
+
+  const parts = orderBy.trim().split(/\s+/);
+  const field = parts[0].toLowerCase();
+  const direction = parts[1] ? parts[1].toUpperCase() : 'DESC';
+
+  // 验证字段是否在白名单中
+  const safeColumn = ALLOWED_ORDER_FIELDS[field];
+  if (!safeColumn) {
+    console.warn(`[dbHelper] 不安全的排序字段: ${field}，使用默认排序 created_at DESC`);
+    return { column: 'created_at', direction: 'DESC' };
+  }
+
+  // 验证排序方向
+  const safeDirection = direction === 'ASC' ? 'ASC' : 'DESC';
+
+  return { column: safeColumn, direction: safeDirection };
+}
+
 async function recordExists(table, field, value) {
   const db = getDB();
   const result = await db(table).where(field, value).first(1);
@@ -103,9 +156,12 @@ async function getRecords(table, options = {}) {
   }
   const [{ total }] = await totalQuery.count('* as total');
 
+  // 使用安全的排序方式替代 orderByRaw
+  const { column, direction } = parseSafeOrderBy(orderBy);
+
   const data = await query
     .select(fields)
-    .orderByRaw(orderBy)
+    .orderBy(column, direction)
     .limit(limit)
     .offset(offset);
 
@@ -118,14 +174,22 @@ async function getRecords(table, options = {}) {
   };
 }
 
+/**
+ * 级联删除 - 使用事务确保数据一致性
+ * @param {Array} cascadeRules - 级联规则数组 [{table, field}, ...]
+ * @param {Array|number} targetIds - 要删除的目标ID列表
+ */
 async function cascadeDelete(cascadeRules, targetIds) {
   const ids = Array.isArray(targetIds) ? targetIds : [targetIds];
   const db = getDB();
 
-  for (const rule of cascadeRules) {
-    const { table, field } = rule;
-    await db(table).whereIn(field, ids).delete();
-  }
+  // 使用事务包裹所有删除操作
+  await db.transaction(async (trx) => {
+    for (const rule of cascadeRules) {
+      const { table, field } = rule;
+      await trx(table).whereIn(field, ids).delete();
+    }
+  });
 }
 
 module.exports = {
@@ -138,5 +202,6 @@ module.exports = {
   deleteRecords,
   getRecord,
   getRecords,
-  cascadeDelete
+  cascadeDelete,
+  parseSafeOrderBy
 };

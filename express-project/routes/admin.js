@@ -13,6 +13,14 @@ const {
 } = require('../utils/validationHelpers')
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser')
 const NotificationHelper = require('../utils/notificationHelper')
+const crypto = require('crypto')
+
+/**
+ * SHA256 哈希函数（兼容所有数据库，不依赖 MySQL 的 SHA2 函数）
+ */
+function sha256(str) {
+  return crypto.createHash('sha256').update(String(str)).digest('hex');
+}
 
 // 创建笔记
 // Posts CRUD 配置
@@ -165,9 +173,9 @@ const postsCrudConfig = {
           if (existingTag.length > 0) {
             tagId = String(existingTag[0].id)
           } else {
-            // 创建新标签
-            const tagResult = await db('tags').insert({ name: tagName })
-            tagId = String(tagResult[0])
+            // 创建新标签（使用 .returning('id') 兼容PostgreSQL）
+            const tagResult = await db('tags').insert({ name: tagName }).returning('id')
+            tagId = String(Array.isArray(tagResult) && tagResult.length > 0 ? tagResult[0].id : null)
           }
         } else {
           // 处理对象格式的标签（向后兼容）
@@ -181,8 +189,8 @@ const postsCrudConfig = {
             if (existingTag.length > 0) {
               tagId = String(existingTag[0].id)
             } else {
-              const tagResult = await db('tags').insert({ name: tag.name })
-              tagId = String(tagResult[0])
+              const tagResult = await db('tags').insert({ name: tag.name }).returning('id')
+              tagId = String(Array.isArray(tagResult) && tagResult.length > 0 ? tagResult[0].id : null)
             }
           }
         }
@@ -354,9 +362,9 @@ const postsCrudConfig = {
             if (existingTag.length > 0) {
               tagId = existingTag[0].id
             } else {
-              // 创建新标签
-              const tagResult = await db('tags').insert({ name: tagName })
-              tagId = tagResult[0]
+              // 创建新标签（使用 .returning('id') 兼容PostgreSQL）
+              const tagResult = await db('tags').insert({ name: tagName }).returning('id')
+              tagId = Array.isArray(tagResult) && tagResult.length > 0 ? tagResult[0].id : null
             }
           } else {
             // 处理对象格式的标签（向后兼容）
@@ -370,8 +378,8 @@ const postsCrudConfig = {
               if (existingTag.length > 0) {
                 tagId = existingTag[0].id
               } else {
-                const tagResult = await db('tags').insert({ name: tag.name })
-                tagId = tagResult[0]
+                const tagResult = await db('tags').insert({ name: tag.name }).returning('id')
+                tagId = Array.isArray(tagResult) && tagResult.length > 0 ? tagResult[0].id : null
               }
             }
           }
@@ -430,7 +438,7 @@ const postsCrudConfig = {
           'p.id', 'p.user_id', 'p.title', 'p.content', 'p.type', 'p.category_id',
           'c.name as category', 'p.view_count', 'p.like_count', 'p.collect_count',
           'p.comment_count', 'p.status', 'p.created_at', 'u.nickname',
-          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(CAST(u.id AS VARCHAR), 3, '0'))) as user_display_id")
         )
 
       if (postResult.length === 0) {
@@ -480,7 +488,7 @@ const postsCrudConfig = {
           'p.id', 'p.user_id', 'p.title', 'p.content', 'p.type', 'p.category_id',
           'c.name as category', 'p.view_count', 'p.like_count', 'p.collect_count',
           'p.comment_count', 'p.status', 'p.created_at', 'u.nickname',
-          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(CAST(u.id AS VARCHAR), 3, '0'))) as user_display_id")
         )
 
       // 搜索条件
@@ -694,7 +702,7 @@ router.get('/posts-audit', adminAuth, requirePermission('post_audit:view'), asyn
         'p.id', 'p.user_id', 'p.title', 'p.content', 'p.type', 'p.category_id',
         'c.name as category', 'p.view_count', 'p.like_count', 'p.collect_count',
         'p.comment_count', 'p.status', 'p.created_at', 'u.nickname',
-        db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+        db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(CAST(u.id AS VARCHAR), 3, '0'))) as user_display_id")
       );
 
     if (req.query.keyword) {
@@ -994,7 +1002,7 @@ const commentsCrudConfig = {
         .select(
           'c.id', 'c.content', 'c.parent_id', 'c.like_count', 'c.created_at',
           'c.user_id', 'u.nickname',
-          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id"),
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(CAST(u.id AS VARCHAR), 3, '0'))) as user_display_id"),
           'p.id as post_id', 'p.title as post_title'
         )
 
@@ -1170,7 +1178,7 @@ const likesCrudConfig = {
         .select(
           'l.id', 'l.user_id', 'l.target_type', 'l.target_id', 'l.created_at',
           'u.nickname',
-          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(CAST(u.id AS VARCHAR), 3, '0'))) as user_display_id")
         )
 
       // 搜索条件
@@ -1342,7 +1350,7 @@ const collectionsCrudConfig = {
         .select(
           'c.id', 'c.user_id', 'c.post_id', 'c.created_at',
           'u.nickname',
-          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id"),
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(CAST(u.id AS VARCHAR), 3, '0'))) as user_display_id"),
           'p.title as post_title'
         )
 
@@ -1502,9 +1510,9 @@ const followsCrudConfig = {
         .select(
           'f.id', 'f.follower_id', 'f.following_id', 'f.created_at',
           'u1.nickname as follower_nickname',
-          db.raw("COALESCE(u1.user_id, CONCAT('user', LPAD(u1.id::text, 3, '0'))) as follower_display_id"),
+          db.raw("COALESCE(u1.user_id, CONCAT('user', LPAD(CAST(u1.id AS VARCHAR), 3, '0'))) as follower_display_id"),
           'u2.nickname as following_nickname',
-          db.raw("COALESCE(u2.user_id, CONCAT('user', LPAD(u2.id::text, 3, '0'))) as following_display_id")
+          db.raw("COALESCE(u2.user_id, CONCAT('user', LPAD(CAST(u2.id AS VARCHAR), 3, '0'))) as following_display_id")
         )
 
       // 搜索条件
@@ -1648,9 +1656,9 @@ const notificationsCrudConfig = {
           'n.id', 'n.user_id', 'n.sender_id', 'n.type', 'n.title', 'n.target_id',
           'n.comment_id', 'n.is_read', 'n.created_at',
           'u1.nickname as user_nickname',
-          db.raw("COALESCE(u1.user_id, CONCAT('user', LPAD(u1.id::text, 3, '0'))) as user_display_id"),
+          db.raw("COALESCE(u1.user_id, CONCAT('user', LPAD(CAST(u1.id AS VARCHAR), 3, '0'))) as user_display_id"),
           'u2.nickname as sender_nickname',
-          db.raw("COALESCE(u2.user_id, CONCAT('user', LPAD(u2.id::text, 3, '0'))) as sender_display_id")
+          db.raw("COALESCE(u2.user_id, CONCAT('user', LPAD(CAST(u2.id AS VARCHAR), 3, '0'))) as sender_display_id")
         )
 
       // 搜索条件
@@ -1771,7 +1779,7 @@ const sessionsCrudConfig = {
           's.id', 's.user_id', 's.refresh_token', 's.user_agent', 's.is_active',
           's.expires_at', 's.created_at',
           'u.nickname',
-          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(u.id::text, 3, '0'))) as user_display_id")
+          db.raw("COALESCE(u.user_id, CONCAT('user', LPAD(CAST(u.id AS VARCHAR), 3, '0'))) as user_display_id")
         )
 
       // 搜索条件
@@ -1986,16 +1994,12 @@ const usersCrudConfig = {
     }
 
     // 设置默认值
-    // 如果没有提供密码，设置默认哈希密码（123456的SHA256哈希值）
+    // 使用 Node.js crypto 生成 SHA256 哈希（兼容 PostgreSQL，不依赖 MySQL 的 SHA2 函数）
     const db = getDB();
     if (!data.password) {
-      // 使用MySQL的SHA2函数生成默认密码的哈希值
-      const result = await db.raw("SELECT SHA2(?, 256) as hashed_password", [String('123456')])
-      data.password = result.rows?.[0]?.hashed_password || result[0]?.hashed_password
+      data.password = sha256('123456')
     } else {
-      // 如果提供了密码，进行哈希处理
-      const result = await db.raw("SELECT SHA2(?, 256) as hashed_password", [String(data.password)])
-      data.password = result.rows?.[0]?.hashed_password || result[0]?.hashed_password
+      data.password = sha256(data.password)
     }
     data.avatar = data.avatar || ''
     data.bio = data.bio || ''
@@ -2856,39 +2860,30 @@ router.put('/audit/:id/approve', adminAuth, requirePermission('audit:audit'), as
 
     const { user_id, type } = verificationResult[0]
 
-    // 开始事务
-    await db.raw('START TRANSACTION')
-
-    try {
+    // 使用 knex 事务 API（比 raw START TRANSACTION/COMMIT 更安全，自动处理连接和回滚）
+    await db.transaction(async (trx) => {
       // 更新认证状态为通过 (1)
-      await db('user_verification').where({ id: id }).update({ status: 1 })
+      await trx('user_verification').where({ id: id }).update({ status: 1 })
 
       // 根据认证类型更新用户的verified字段
       // type: 1-官方认证, 2-个人认证
       const verifiedValue = type === 1 ? 1 : (type === 2 ? 2 : 0)
-      await db('users').where({ id: String(user_id) }).update({ verified: verifiedValue })
+      await trx('users').where({ id: String(user_id) }).update({ verified: verifiedValue })
 
       // 更新audit表中的审核记录
-      await db('audit')
+      await trx('audit')
         .where({ type: type, target_id: String(user_id), status: 0 })
         .update({
           status: 1,
           admin_id: adminId,
           audit_time: db.fn.now()
         })
+    })
 
-      // 提交事务
-      await db.raw('COMMIT')
-
-      res.json({
-        code: RESPONSE_CODES.SUCCESS,
-        message: '审核通过成功'
-      })
-    } catch (error) {
-      // 回滚事务
-      await db.raw('ROLLBACK')
-      throw error
-    }
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: '审核通过成功'
+    })
   } catch (error) {
     console.error('审核通过失败:', error)
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
@@ -2917,37 +2912,28 @@ router.put('/audit/:id/reject', adminAuth, requirePermission('audit:audit'), asy
 
     const { user_id, type } = verificationResult[0]
 
-    // 开始事务
-    await db.raw('START TRANSACTION')
-
-    try {
+    // 使用 knex 事务 API（比 raw START TRANSACTION/COMMIT 更安全，自动处理连接和回滚）
+    await db.transaction(async (trx) => {
       // 更新认证状态为拒绝 (2)
-      await db('user_verification').where({ id: id }).update({ status: 2 })
+      await trx('user_verification').where({ id: id }).update({ status: 2 })
 
       // 拒绝认证申请时，将用户的verified字段设置为0（未认证）
-      await db('users').where({ id: String(user_id) }).update({ verified: 0 })
+      await trx('users').where({ id: String(user_id) }).update({ verified: 0 })
 
       // 更新audit表中的审核记录
-      await db('audit')
+      await trx('audit')
         .where({ type: type, target_id: String(user_id), status: 0 })
         .update({
           status: 2,
           admin_id: adminId,
           audit_time: db.fn.now()
         })
+    })
 
-      // 提交事务
-      await db.raw('COMMIT')
-
-      res.json({
-        code: RESPONSE_CODES.SUCCESS,
-        message: '拒绝申请成功'
-      })
-    } catch (error) {
-      // 回滚事务
-      await db.raw('ROLLBACK')
-      throw error
-    }
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: '拒绝申请成功'
+    })
   } catch (error) {
     console.error('拒绝申请失败:', error)
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
@@ -3104,13 +3090,16 @@ const categoriesCrudConfig = {
       }
 
       // 创建分类
-      const [result] = await db('categories').insert({
+      // 使用 .returning('*') 获取插入的完整行（PostgreSQL兼容）
+      const insertedRows = await db('categories').insert({
         name: name.trim(),
         category_title: category_title.trim()
-      });
+      }).returning('*');
+
+      const result = Array.isArray(insertedRows) && insertedRows.length > 0 ? insertedRows[0] : null;
 
       return {
-        id: result[0],
+        id: result?.id,
         name: name.trim(),
         category_title: category_title.trim()
       };

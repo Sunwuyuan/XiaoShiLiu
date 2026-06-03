@@ -131,10 +131,24 @@ router.get('/search', optionalAuth, async (req, res) => {
       .limit(limit)
       .offset(offset);
 
-    // 为每个用户添加笔记数
-    for (let user of rows) {
-      const postCount = await db('posts').where({ user_id: user.id, status: 0 }).count('* as count').first();
-      user.post_count = parseInt(postCount.count);
+    // 批量获取用户笔记数，避免 N+1 查询
+    if (rows.length > 0) {
+      const userIds = rows.map(u => u.id);
+      const postCounts = await db('posts')
+        .select('user_id')
+        .whereIn('user_id', userIds)
+        .where({ status: 0 })
+        .groupBy('user_id')
+        .count('* as count');
+      
+      const postCountMap = {};
+      postCounts.forEach(pc => {
+        postCountMap[pc.user_id] = parseInt(pc.count);
+      });
+      
+      for (let user of rows) {
+        user.post_count = postCountMap[user.id] || 0;
+      }
     }
 
     // 检查关注状态（仅在用户已登录时）

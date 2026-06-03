@@ -11,6 +11,16 @@ const { sendEmailCode } = require('../utils/email');
 const svgCaptcha = require('svg-captcha');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+
+/**
+ * 使用 Node.js crypto 生成 SHA256 哈希（兼容所有数据库，不依赖 MySQL 的 SHA2 函数）
+ * @param {string} str - 待哈希字符串
+ * @returns {string} 十六进制哈希值
+ */
+function sha256(str) {
+  return crypto.createHash('sha256').update(str).digest('hex');
+}
 
 function isValidEmail(email) {
   if (typeof email !== 'string') return false;
@@ -406,9 +416,9 @@ router.post('/reset-password', async (req, res) => {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '验证码错误' });
     }
 
-    // 更新密码
+    // 更新密码（使用 Node.js crypto 哈希，兼容 PostgreSQL）
     const db = getDB();
-    await db('users').where({ email: email }).update({ password: db.raw('SHA2(?, 256)', [newPassword]) });
+    await db('users').where({ email: email }).update({ password: sha256(newPassword) });
 
     // 删除已使用的验证码
     emailCodeStore.delete(`reset_${email}`);
@@ -568,18 +578,22 @@ router.post('/register', async (req, res) => {
     // 插入新用户（密码使用SHA2哈希加密）
     // 邮件功能未启用时，email字段存储空字符串
     const userEmail = isEmailEnabled ? email : '';
-    const result = await db('users').insert({
+    // 使用 .returning('id') 获取自增ID（PostgreSQL兼容）
+    const insertedUsers = await db('users').insert({
       user_id: user_id,
       nickname: nickname,
-      password: db.raw('SHA2(?, 256)', [password]),
+      password: sha256(password),
       email: userEmail,
       avatar: defaultAvatar,
       bio: '',
       location: ipLocation,
       last_login_at: db.fn.now()
-    });
+    }).returning('id');
 
-    const userId = result[0];
+    const userId = Array.isArray(insertedUsers) && insertedUsers.length > 0 ? insertedUsers[0].id : null;
+    if (!userId) {
+      throw new Error('创建用户失败：无法获取用户ID');
+    }
 
     // 生成JWT令牌
     const accessToken = generateAccessToken({ userId, user_id });
@@ -590,7 +604,7 @@ router.post('/register', async (req, res) => {
       user_id: userId.toString(),
       token: accessToken,
       refresh_token: refreshToken,
-      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       user_agent: userAgent,
       is_active: 1
     });
@@ -647,10 +661,10 @@ router.post('/login', async (req, res) => {
       return res.status(HTTP_STATUS.FORBIDDEN).json({ code: RESPONSE_CODES.FORBIDDEN, message: '账户已被禁用' });
     }
 
-    // 验证密码（哈希比较）
+    // 验证密码（哈希比较，使用 Node.js crypto 兼容 PostgreSQL）
+    const hashedPassword = sha256(password);
     const passwordCheck = await db('users')
-      .where({ id: user.id.toString() })
-      .whereRaw('password = SHA2(?, 256)', [password])
+      .where({ id: user.id.toString(), password: hashedPassword })
       .select(1);
 
     if (passwordCheck.length === 0) {
@@ -678,7 +692,7 @@ router.post('/login', async (req, res) => {
       user_id: user.id.toString(),
       token: accessToken,
       refresh_token: refreshToken,
-      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       user_agent: userAgent,
       is_active: 1
     });
@@ -780,7 +794,7 @@ router.post('/refresh', async (req, res) => {
     await db('user_sessions').where({ id: sessionRows[0].id.toString() }).update({
       token: newAccessToken,
       refresh_token: newRefreshToken,
-      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       user_agent: userAgent
     });
 
@@ -1086,20 +1100,23 @@ router.post('/admin/admins', authenticateToken, async (req, res) => {
     }
 
     // 创建管理员（Logto关联，无需密码）
-    const result = await db('admin').insert({
+    // 使用 .returning('id') 获取自增ID（PostgreSQL兼容）
+    const insertedAdmins = await db('admin').insert({
       username: username,
       logto_id: logtoId || null,
       nickname: nickname || username,
       permissions: JSON.stringify(permissions || []),
       is_super: isSuper ? 1 : 0,
       created_at: db.fn.now()
-    });
+    }).returning('id');
+
+    const adminId = Array.isArray(insertedAdmins) && insertedAdmins.length > 0 ? insertedAdmins[0].id : null;
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: '创建管理员成功',
       data: {
-        id: result[0]
+        id: adminId
       }
     });
   } catch (error) {
@@ -1253,7 +1270,7 @@ router.post('/admin/refresh', async (req, res) => {
     await db('admin_sessions').where({ id: sessionRows[0].id.toString() }).update({
       token: newAccessToken,
       refresh_token: newRefreshToken,
-      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       user_agent: userAgent
     });
 

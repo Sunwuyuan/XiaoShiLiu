@@ -4,11 +4,11 @@ services:
     container_name: xiaoshiliu-db
     restart: always
     environment:
-      POSTGRES_USER: ${PG_USER:-xiaoadmin}
+      POSTGRES_USER: ${PG_USER:-postgres}
       POSTGRES_PASSWORD: ${PG_PASSWORD:?请设置 PG_PASSWORD}
       POSTGRES_DB: ${PG_DATABASE:-xiaoshiliu}
     ports:
-      - "${PG_PORT:-15432}:5432"
+      - "${PG_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

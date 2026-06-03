@@ -317,7 +317,7 @@ router.post('/callback', async (req, res) => {
       user_id: user.id.toString(),
       token: accessToken,
       refresh_token: refreshToken,
-      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       user_agent: userAgent,
       is_active: 1
     });
@@ -584,7 +584,7 @@ router.post('/admin/callback', async (req, res) => {
       admin_id: admin.id.toString(),
       token: accessToken,
       refresh_token: refreshToken,
-      expires_at: db.raw("CURRENT_TIMESTAMP + INTERVAL '7 days'"),
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       user_agent: req.headers['user-agent'] || '',
       is_active: 1
     });
