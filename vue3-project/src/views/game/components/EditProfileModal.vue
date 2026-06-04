@@ -156,10 +156,16 @@ async function handleDeleteSkin() {
   }
 }
 
+function isPngFile(file) {
+  if (!file) return false
+  // 兼容不同系统：优先检查MIME类型，其次检查扩展名
+  return file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')
+}
+
 function handleSkinChange(event) {
   const file = event.target.files[0]
-  
-  if (file && file.type === 'image/png') {
+
+  if (file && isPngFile(file)) {
     if (file.size > 500 * 1024) {
       messageManager.error('文件大小超过500KB限制')
       return
@@ -173,7 +179,7 @@ function handleSkinChange(event) {
 function handleCapeChange(event) {
   const file = event.target.files[0]
 
-  if (file && file.type === 'image/png') {
+  if (file && isPngFile(file)) {
     if (file.size > 500 * 1024) {
       messageManager.error('文件大小超过500KB限制')
       return
@@ -368,9 +374,8 @@ async function handleDeleteCape() {
               </div>
 
               <div class="file-input-wrapper">
-                <input 
-                  type="file" 
-                  accept=".png,image/png"
+                <input
+                  type="file"
                   @change="handleSkinChange"
                   id="skin-file"
                 />

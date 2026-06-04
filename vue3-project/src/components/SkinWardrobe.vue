@@ -205,11 +205,16 @@ function openAddDialog() {
   showDialog.value = true
 }
 
+function isPngFile(file) {
+  if (!file) return false
+  return file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')
+}
+
 function handleSkinUpload(event) {
   const file = event.target.files[0]
   if (!file) return
 
-  if (file.type !== 'image/png') {
+  if (!isPngFile(file)) {
     messageManager.error('只支持PNG格式的图片文件')
     event.target.value = ''
     return
@@ -228,7 +233,7 @@ function handleCapeUpload(event) {
   const file = event.target.files[0]
   if (!file) return
 
-  if (file.type !== 'image/png') {
+  if (!isPngFile(file)) {
     messageManager.error('只支持PNG格式的图片文件')
     event.target.value = ''
     return
