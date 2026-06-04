@@ -1,8 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { gameApi } from '@/api/game'
 import messageManager from '@/utils/messageManager'
-import SkinViewer3D from '@/components/SkinViewer3D.vue'
 
 const props = defineProps({
   profile: {
@@ -18,20 +17,15 @@ const newName = ref('')
 const oldPassword = ref('')
 const newPassword = ref('')
 const confirmNewPassword = ref('')
-const skinFile = ref(null)
-const capeFile = ref(null)
-const selectedModel = ref('classic')
 const isSubmitting = ref(false)
 const showOldPassword = ref(false)
 const showNewPassword = ref(false)
 
 newName.value = props.profile.player_name
-selectedModel.value = props.profile.skin_model || 'classic'
 
 const tabs = [
   { key: 'info', label: '基本信息' },
-  { key: 'password', label: '修改密码' },
-  { key: 'skin', label: '皮肤管理' }
+  { key: 'password', label: '修改密码' }
 ]
 
 async function handleUpdateName() {
@@ -107,132 +101,6 @@ async function handleUpdatePassword() {
     messageManager.error(error.response?.data?.message || '修改失败')
   } finally {
     isSubmitting.value = false
-  }
-}
-
-async function handleUploadSkin() {
-  if (!skinFile.value) {
-    messageManager.error('请选择皮肤文件')
-    return
-  }
-
-  isSubmitting.value = true
-
-  try {
-    const res = await gameApi.uploadSkin(props.profile.id, skinFile.value, selectedModel.value)
-
-    if (res.success) {
-      emit('updated', res.data)
-      skinFile.value = null
-      messageManager.success('皮肤上传成功！')
-    } else {
-      messageManager.error(res.message || '上传失败')
-    }
-  } catch (error) {
-    console.error('上传皮肤失败:', error)
-    messageManager.error(error.response?.data?.message || '上传失败，请稍后重试')
-  } finally {
-    isSubmitting.value = false
-  }
-}
-
-async function handleDeleteSkin() {
-  if (!confirm('确定要删除皮肤吗？将恢复为默认皮肤')) {
-    return
-  }
-
-  try {
-    const res = await gameApi.deleteSkin(props.profile.id)
-
-    if (res.success) {
-      emit('updated', { skin_url: null, skin_model: 'classic' })
-      messageManager.success('皮肤已删除')
-    } else {
-      messageManager.error(res.message || '删除失败')
-    }
-  } catch (error) {
-    console.error('删除皮肤失败:', error)
-    messageManager.error(error.response?.data?.message || '删除失败')
-  }
-}
-
-function isPngFile(file) {
-  if (!file) return false
-  // 兼容不同系统：优先检查MIME类型，其次检查扩展名
-  return file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')
-}
-
-function handleSkinChange(event) {
-  const file = event.target.files[0]
-
-  if (file && isPngFile(file)) {
-    if (file.size > 500 * 1024) {
-      messageManager.error('文件大小超过500KB限制')
-      return
-    }
-    skinFile.value = file
-  } else {
-    messageManager.error('只支持PNG格式的图片文件')
-  }
-}
-
-function handleCapeChange(event) {
-  const file = event.target.files[0]
-
-  if (file && isPngFile(file)) {
-    if (file.size > 500 * 1024) {
-      messageManager.error('文件大小超过500KB限制')
-      return
-    }
-    capeFile.value = file
-  } else {
-    messageManager.error('只支持PNG格式的图片文件')
-  }
-}
-
-async function handleUploadCape() {
-  if (!capeFile.value) {
-    messageManager.error('请选择披风文件')
-    return
-  }
-
-  isSubmitting.value = true
-
-  try {
-    const res = await gameApi.uploadCape(props.profile.id, capeFile.value)
-
-    if (res.success) {
-      emit('updated', res.data)
-      capeFile.value = null
-      messageManager.success('披风上传成功！')
-    } else {
-      messageManager.error(res.message || '上传失败')
-    }
-  } catch (error) {
-    console.error('上传披风失败:', error)
-    messageManager.error(error.response?.data?.message || '上传失败，请稍后重试')
-  } finally {
-    isSubmitting.value = false
-  }
-}
-
-async function handleDeleteCape() {
-  if (!confirm('确定要删除披风吗？')) {
-    return
-  }
-
-  try {
-    const res = await gameApi.deleteCape(props.profile.id)
-
-    if (res.success) {
-      emit('updated', { cape_url: null })
-      messageManager.success('披风已删除')
-    } else {
-      messageManager.error(res.message || '删除失败')
-    }
-  } catch (error) {
-    console.error('删除披风失败:', error)
-    messageManager.error(error.response?.data?.message || '删除失败')
   }
 }
 </script>
@@ -337,106 +205,6 @@ async function handleDeleteCape() {
           </form>
         </div>
 
-        <!-- 皮肤管理 Tab -->
-        <div v-if="activeTab === 'skin'" class="tab-content">
-          <div class="skin-section">
-            <h3>皮肤设置</h3>
-            
-            <div v-if="profile.skin_url" class="current-skin">
-              <p class="section-label">当前皮肤：</p>
-              <SkinViewer3D
-                :skin-url="profile.skin_url"
-                :cape-url="profile.cape_url || ''"
-                :player-name="profile.player_name"
-                :skin-model="profile.skin_model || 'auto-detect'"
-                :width="240"
-                :height="320"
-                :show-controls="true"
-                :show-name-tag="true"
-              />
-              <button 
-                class="btn btn-danger btn-sm"
-                @click="handleDeleteSkin"
-              >
-                删除皮肤
-              </button>
-            </div>
-
-            <div class="upload-section">
-              <p class="section-label">上传新皮肤：</p>
-              
-              <div class="model-select">
-                <label>模型类型：</label>
-                <select v-model="selectedModel">
-                  <option value="classic">经典（默认手臂宽度）</option>
-                  <option value="slim">细手臂（Alex模型）</option>
-                </select>
-              </div>
-
-              <div class="file-input-wrapper">
-                <input
-                  type="file"
-                  @change="handleSkinChange"
-                  id="skin-file"
-                />
-                <label for="skin-file" class="file-label">
-                  选择皮肤文件（PNG格式，最大500KB）
-                </label>
-                <p v-if="skinFile" class="file-selected">
-                  已选择: {{ skinFile.name }} ({{ (skinFile.size / 1024).toFixed(1) }}KB)
-                </p>
-              </div>
-
-              <button 
-                class="btn btn-primary"
-                @click="handleUploadSkin"
-                :disabled="!skinFile || isSubmitting"
-              >
-                {{ isSubmitting ? '上传中...' : '上传皮肤' }}
-              </button>
-            </div>
-          </div>
-
-          <div class="cape-section">
-            <h3>披风设置</h3>
-            
-            <div v-if="profile.cape_url" class="current-cape">
-              <p class="section-label">当前披风：已设置</p>
-              <button 
-                class="btn btn-danger btn-sm"
-                @click="handleDeleteCape"
-              >
-                删除披风
-              </button>
-            </div>
-
-            <div class="upload-section">
-              <p class="section-label">{{ profile.cape_url ? '更换披风' : '上传披风' }}：</p>
-              
-              <div class="file-input-wrapper">
-                <input 
-                  type="file" 
-                  @change="handleCapeChange"
-                  id="cape-file"
-                />
-                <label for="cape-file" class="file-label">
-                  选择披风文件（PNG格式，最大500KB）
-                </label>
-                <p v-if="capeFile" class="file-selected">
-                  已选择: {{ capeFile.name }} ({{ (capeFile.size / 1024).toFixed(1) }}KB)
-                </p>
-              </div>
-
-              <button 
-                class="btn btn-secondary"
-                @click="handleUploadCape"
-                :disabled="!capeFile || isSubmitting"
-              >
-                {{ isSubmitting ? '上传中...' : '上传披风' }}
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -620,97 +388,6 @@ async function handleDeleteCape() {
   border-radius: 8px;
   color: #92400e;
   font-size: 13px;
-}
-
-.skin-section,
-.cape-section {
-  margin-bottom: 28px;
-}
-
-.skin-section h3,
-.cape-section h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-color-primary);
-  margin: 0 0 16px 0;
-}
-
-.section-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-color-secondary);
-  margin: 0 0 10px 0;
-}
-
-.current-skin,
-.current-cape {
-  margin-bottom: 20px;
-  padding: 16px;
-  background: var(--bg-color-primary);
-  border-radius: 8px;
-  text-align: center;
-}
-
-.upload-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.model-select {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-}
-
-.model-select select {
-  flex: 1;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-color-primary);
-  color: var(--text-color-primary);
-  font-size: 14px;
-}
-
-.file-input-wrapper {
-  position: relative;
-}
-
-.file-input-wrapper input[type="file"] {
-  position: absolute;
-  opacity: 0;
-  width: 100%;
-  height: 100%;
-  cursor: pointer;
-  z-index: 2;
-}
-
-.file-label {
-  display: block;
-  padding: 16px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  text-align: center;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--text-color-secondary);
-  transition: all 0.3s ease;
-  position: relative;
-  z-index: 1;
-}
-
-.file-label:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-  background: var(--bg-color-tertiary);
-}
-
-.file-selected {
-  font-size: 13px;
-  color: #10b981;
-  margin-top: 8px;
 }
 
 .form-actions {

@@ -22,9 +22,19 @@
         :key="item.id"
         :class="['wardrobe-item', { 'is-active': item.is_active }]"
       >
-        <!-- 皮肤预览 -->
+        <!-- 皮肤3D预览 -->
         <div class="skin-preview">
-          <img :src="item.skin_url" :alt="item.name" />
+          <SkinViewer3D
+            :skin-url="item.skin_url"
+            :cape-url="item.cape_url || ''"
+            :player-name="item.name"
+            :skin-model="item.skin_model"
+            :width="160"
+            :height="200"
+            :show-controls="false"
+            :show-name-tag="false"
+            :enable-controls="true"
+          />
           <div v-if="item.cape_url" class="cape-badge">披风</div>
           <div v-if="item.is_active" class="active-badge">当前使用</div>
         </div>
@@ -148,6 +158,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { gameApi } from '@/api/game'
 import messageManager from '@/utils/messageManager'
 import SvgIcon from '@/components/SvgIcon.vue'
+import SkinViewer3D from '@/components/SkinViewer3D.vue'
 
 const props = defineProps({
   profileId: {
@@ -461,25 +472,15 @@ function formatTime(dateString) {
   display: flex;
 }
 
-/* ====== 皮肤预览区 ====== */
+/* ====== 皮肤预览区（3D） ====== */
 .skin-preview {
   position: relative;
   width: 100%;
-  height: 160px;
-  background: linear-gradient(180deg, #87CEEB 0%, #98D8C8 100%);
+  background: var(--bg-color-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-}
-
-.skin-preview img {
-  max-width: 70%;
-  max-height: 85%;
-  object-fit: contain;
-  image-rendering: pixelated;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: crisp-edges;
 }
 
 /* 标记徽章 */
@@ -538,8 +539,8 @@ function formatTime(dateString) {
 }
 
 .model-tag.classic {
-  background: #dbeafe;
-  color: #1e40af;
+  background: var(--primary-color-light, #dbeafe);
+  color: var(--primary-color-dark, #1e40af);
 }
 
 .model-tag.slim {
@@ -827,5 +828,65 @@ function formatTime(dateString) {
   gap: 12px;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+/* ====== 移动端适配 ====== */
+@media (max-width: 768px) {
+  .skin-wardrobe {
+    padding: 0;
+  }
+
+  .wardrobe-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .wardrobe-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .wardrobe-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .skin-info {
+    padding: 8px 10px;
+  }
+
+  .skin-name {
+    font-size: 12px;
+  }
+
+  .action-buttons {
+    opacity: 1;
+    position: relative;
+    background: none;
+    padding: 6px 10px;
+  }
+
+  .modal-container {
+    max-width: 100%;
+    border-radius: 12px 12px 0 0;
+    margin: auto 0 0 0;
+    max-height: 85vh;
+  }
+
+  .edit-form {
+    padding: 16px;
+    gap: 16px;
+  }
+
+  .form-actions {
+    flex-direction: column-reverse;
+  }
+
+  .form-actions .btn {
+    width: 100%;
+  }
 }
 </style>
