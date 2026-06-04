@@ -190,7 +190,7 @@ onMounted(async () => {
 async function fetchWardrobe() {
   try {
     const res = await gameApi.getWardrobe(props.profileId)
-    if (res.code === 200) {
+    if (res.success) {
       wardrobeList.value = res.data.wardrobe || []
       maxWardrobes.value = res.data.max_wardrobes || 10
     }
@@ -290,7 +290,7 @@ async function handleSubmit() {
       res = await gameApi.addToWardrobe(props.profileId, formPayload)
     }
 
-    if (res.code === 200) {
+    if (res.success) {
       messageManager.success(editingItem.value ? '更新成功' : '添加成功')
       showDialog.value = false
       resetForm()
@@ -322,7 +322,7 @@ async function deleteItem(item) {
 
   try {
     const res = await gameApi.deleteWardrobeItem(props.profileId, item.id)
-    if (res.code === 200) {
+    if (res.success) {
       messageManager.success('删除成功')
       await fetchWardrobe()
     } else {
@@ -353,7 +353,7 @@ async function equipSkin(item) {
   try {
     const res = await gameApi.equipWardrobeItem(props.profileId, item.id)
 
-    if (res.code === 200) {
+    if (res.success) {
       messageManager.success(`已切换为「${item.name}」，请重新登录游戏`)
       emit('equipped', item)
       await fetchWardrobe()
