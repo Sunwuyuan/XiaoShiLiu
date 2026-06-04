@@ -395,6 +395,9 @@ function copyToClipboard(text) {
   .player-avatar {
     width: 48px;
     height: 48px;
+    /* 48px 头像：background-size=384px(48*8), position=-48px(-6*8) */
+    background-size: 384px 384px;
+    background-position: -48px -48px;
   }
 
   .player-name {
