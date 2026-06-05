@@ -23,6 +23,7 @@ const showTempPasswordModal = ref(false)
 const showSessionModal = ref(false)
 const showWardrobe = ref(false)
 const isDeleting = ref(false)
+const showUuid = ref(false)
 
 // 获取代理 URL（解决 CORS 问题）
 function getProxyUrl(url) {
@@ -94,8 +95,14 @@ function copyToClipboard(text) {
           {{ profile.player_name }}@dy.ci
           <SvgIcon name="copy" class="copy-icon" />
         </h3>
-        <p class="uuid-text" @click="copyToClipboard(profile.uuid)">
-          {{ profile.uuid }}
+        <p
+          class="uuid-text"
+          :class="{ expanded: showUuid }"
+          @click="showUuid = !showUuid; copyToClipboard(profile.uuid)"
+          title="点击展开/复制 UUID"
+        >
+          <span class="uuid-label">UUID</span>
+          <span class="uuid-value">{{ profile.uuid }}</span>
           <SvgIcon name="copy" class="copy-icon" />
         </p>
         <span v-if="isBanned" class="ban-badge">已封禁</span>
@@ -288,10 +295,33 @@ function copyToClipboard(text) {
   color: var(--text-color-tertiary);
   margin: 0;
   cursor: pointer;
-  word-break: break-all;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.uuid-label {
+  font-weight: 600;
+  color: var(--text-color-secondary);
+  flex-shrink: 0;
+}
+
+.uuid-value {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 0;
+  opacity: 0;
+  transition: max-width 0.3s ease, opacity 0.2s ease;
+}
+
+.uuid-text.expanded .uuid-value {
+  max-width: 300px;
+  opacity: 1;
 }
 
 .uuid-text:hover {
