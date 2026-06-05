@@ -39,7 +39,8 @@ const {
   buildErrorResponse,
   createFileHash,
   signData,
-  getSignaturePublicKey
+  getSignaturePublicKey,
+  hashPassword
 } = require('../utils/yggdrasilHelper');
 
 // 内存存储用于serverId验证（生产环境建议使用Redis）
@@ -151,8 +152,70 @@ router.post('/authserver/authenticate', async (req, res) => {
       ));
     }
 
-    const valid = await verifyPassword(password, profile.password_hash);
-    
+    let valid = await verifyPassword(password, profile.password_hash);
+    let isTempPassword = false;
+    let tempPasswordRecord = null;
+
+    // 如果原密码不匹配，检查临时密码
+    if (!valid) {
+      const db = getDB();
+      const now = new Date();
+
+      tempPasswordRecord = await db('mc_temp_passwords')
+        .where({ profile_id: profile.id, is_revoked: false })
+        .where('expires_at', '>', now)
+        .first();
+
+      if (tempPasswordRecord) {
+        const tempValid = await verifyPassword(password, tempPasswordRecord.temp_password_hash);
+
+        if (tempValid) {
+          // 检查是否已用完
+          if (tempPasswordRecord.used_count >= tempPasswordRecord.max_uses) {
+            await auditLog('LOGIN_FAILED', profile.user_id, profile.id, req.ip, {
+              reason: 'temp_password_depleted',
+              temp_id: tempPasswordRecord.id
+            });
+            return res.status(403).json(buildErrorResponse(
+              'ForbiddenOperationException',
+              '临时密码已达到使用次数上限'
+            ));
+          }
+
+          // 更新使用次数
+          await db('mc_temp_passwords')
+            .where({ id: tempPasswordRecord.id })
+            .update({
+              used_count: tempPasswordRecord.used_count + 1,
+              last_used_at: new Date(),
+              last_used_ip: req.ip
+            });
+
+          // 如果用完了，自动撤销
+          if (tempPasswordRecord.used_count + 1 >= tempPasswordRecord.max_uses) {
+            await db('mc_temp_passwords')
+              .where({ id: tempPasswordRecord.id })
+              .update({
+                is_revoked: true,
+                revoked_at: new Date(),
+                revoke_reason: '使用次数耗尽'
+              });
+          }
+
+          valid = true;
+          isTempPassword = true;
+
+          await auditLog('TEMP_PASSWORD_LOGIN', profile.user_id, profile.id, req.ip, {
+            temp_id: tempPasswordRecord.id,
+            used_count: tempPasswordRecord.used_count + 1,
+            max_uses: tempPasswordRecord.max_uses
+          });
+
+          console.log(`[Yggdrasil] 用户 ${username} 使用临时密码登录 (剩余 ${tempPasswordRecord.max_uses - tempPasswordRecord.used_count - 1} 次)`);
+        }
+      }
+    }
+
     if (!valid) {
       await auditLog('LOGIN_FAILED', profile.user_id, profile.id, req.ip, { reason: 'wrong_password' });
       return res.status(403).json(buildErrorResponse(

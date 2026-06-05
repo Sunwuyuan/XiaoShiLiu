@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { gameApi } from '@/api/game'
 import EditProfileModal from './EditProfileModal.vue'
+import TempPasswordModal from './TempPasswordModal.vue'
 import SkinWardrobe from '@/components/SkinWardrobe.vue'
 import messageManager from '@/utils/messageManager'
 import SvgIcon from '@/components/SvgIcon.vue'
@@ -17,6 +18,7 @@ const props = defineProps({
 const emit = defineEmits(['update', 'delete'])
 
 const showEditModal = ref(false)
+const showTempPasswordModal = ref(false)
 const showWardrobe = ref(false)
 const isDeleting = ref(false)
 
@@ -97,6 +99,15 @@ function copyToClipboard(text) {
       <div class="card-actions">
         <button
           v-if="!isBanned"
+          class="action-btn temp-password-btn"
+          @click="showTempPasswordModal = true"
+          title="临时密码"
+        >
+          <SvgIcon name="magic" />
+        </button>
+
+        <button
+          v-if="!isBanned"
           class="action-btn wardrobe-btn"
           @click="showWardrobe = !showWardrobe"
           title="皮肤衣柜"
@@ -113,8 +124,8 @@ function copyToClipboard(text) {
           <SvgIcon name="edit" />
         </button>
 
-        <button 
-          class="action-btn delete-btn" 
+        <button
+          class="action-btn delete-btn"
           @click="handleDelete"
           :disabled="isDeleting"
           title="删除角色"
@@ -163,6 +174,14 @@ function copyToClipboard(text) {
         :profile="profile"
         @close="showEditModal = false"
         @updated="handleEditComplete"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <TempPasswordModal
+        v-if="showTempPasswordModal"
+        :profile="profile"
+        @close="showTempPasswordModal = false"
       />
     </Teleport>
 
@@ -286,6 +305,10 @@ function copyToClipboard(text) {
 
 .edit-btn:hover:not(:disabled) {
   color: var(--primary-color);
+}
+
+.temp-password-btn:hover:not(:disabled) {
+  color: #8b5cf6;
 }
 
 .wardrobe-btn:hover:not(:disabled) {

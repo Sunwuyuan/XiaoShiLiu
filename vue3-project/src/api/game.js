@@ -163,6 +163,33 @@ export const gameApi = {
       method: 'put',
       data: { items }
     })
+  },
+
+  // ========== 临时密码 API ==========
+
+  // 获取临时密码列表
+  getTempPasswords(profileId) {
+    return request({
+      url: `/game/profile/${profileId}/temp-passwords`,
+      method: 'get'
+    })
+  },
+
+  // 创建临时密码
+  createTempPassword(profileId, data) {
+    return request({
+      url: `/game/profile/${profileId}/temp-password`,
+      method: 'post',
+      data
+    })
+  },
+
+  // 撤销临时密码
+  revokeTempPassword(profileId, tempId) {
+    return request({
+      url: `/game/profile/${profileId}/temp-password/${tempId}`,
+      method: 'delete'
+    })
   }
 }
 

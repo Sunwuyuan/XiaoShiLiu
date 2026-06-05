@@ -35,7 +35,18 @@ const { getDB } = require('../utils/db');
 
 const MAX_PROFILES_PER_USER = parseInt(process.env.MAX_PROFILES_PER_USER) || 1;
 const MAX_WARDROBE_ITEMS = parseInt(process.env.MAX_WARDROBE_ITEMS) || 10;
+const MAX_TEMP_PASSWORDS = parseInt(process.env.MAX_TEMP_PASSWORDS) || 5;
 const SKIN_MAX_SIZE = 500 * 1024;
+
+// 生成随机临时密码（12位，字母数字混合）
+function generateTempPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let result = '';
+  for (let i = 0; i < 12; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
 
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -1480,6 +1491,255 @@ router.put('/profile/:id/wardrobe/sort', authenticateToken, async (req, res) => 
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
       code: RESPONSE_CODES.ERROR,
       message: '服务器内部错误'
+    });
+  }
+});
+
+// ========== 临时密码功能 ==========
+
+// 获取角色的临时密码列表
+router.get('/profile/:id/temp-passwords', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '用户认证信息无效，请重新登录'
+      });
+    }
+
+    const profileId = parseInt(req.params.id);
+    const profile = await getProfileById(profileId);
+
+    if (!profile || !matchUserId(profile.user_id, req.user.id)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权操作此角色'
+      });
+    }
+
+    const db = getDB();
+    const now = new Date();
+
+    const tempPasswords = await db('mc_temp_passwords')
+      .where({ profile_id: profileId })
+      .where('is_revoked', false)
+      .where('expires_at', '>', now)
+      .select('id', 'temp_password_plain', 'max_uses', 'used_count', 'expires_at', 'last_used_ip', 'last_used_at', 'created_at')
+      .orderBy('created_at', 'desc');
+
+    // 计算状态
+    const formatted = tempPasswords.map(tp => ({
+      id: tp.id,
+      password: tp.temp_password_plain,
+      max_uses: tp.max_uses,
+      used_count: tp.used_count,
+      remaining_uses: Math.max(0, tp.max_uses - tp.used_count),
+      expires_at: tp.expires_at,
+      is_expired: new Date(tp.expires_at) <= now,
+      is_depleted: tp.used_count >= tp.max_uses,
+      last_used_ip: tp.last_used_ip,
+      last_used_at: tp.last_used_at,
+      created_at: tp.created_at
+    }));
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      data: formatted,
+      message: '获取成功'
+    });
+
+  } catch (error) {
+    console.error('[Game] 获取临时密码列表失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '服务器内部错误'
+    });
+  }
+});
+
+// 创建临时密码
+router.post('/profile/:id/temp-password', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '用户认证信息无效，请重新登录'
+      });
+    }
+
+    const profileId = parseInt(req.params.id);
+    const { max_uses, expires_at } = req.body;
+
+    const profile = await getProfileById(profileId);
+
+    if (!profile || !matchUserId(profile.user_id, req.user.id)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权操作此角色'
+      });
+    }
+
+    // 验证参数
+    const uses = parseInt(max_uses);
+    if (!uses || uses < 1 || uses > 100) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '登录次数必须在 1-100 之间'
+      });
+    }
+
+    if (!expires_at) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '请设置过期时间'
+      });
+    }
+
+    const expiresDate = new Date(expires_at);
+    const now = new Date();
+    const maxDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 最多30天
+
+    if (expiresDate <= now) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '过期时间必须在未来'
+      });
+    }
+
+    if (expiresDate > maxDate) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '过期时间不能超过30天'
+      });
+    }
+
+    const db = getDB();
+
+    // 检查数量限制
+    const [countResult] = await db('mc_temp_passwords')
+      .where({ profile_id: profileId, is_revoked: false })
+      .where('expires_at', '>', now)
+      .count('* as count');
+
+    if (parseInt(countResult.count) >= MAX_TEMP_PASSWORDS) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: `每个角色最多同时拥有 ${MAX_TEMP_PASSWORDS} 个临时密码`
+      });
+    }
+
+    // 生成临时密码
+    const plainPassword = generateTempPassword();
+    const passwordHash = await hashPassword(plainPassword);
+
+    const insertResult = await db('mc_temp_passwords')
+      .insert({
+        profile_id: profileId,
+        user_id: req.user.id,
+        temp_password_hash: passwordHash,
+        temp_password_plain: plainPassword,
+        max_uses: uses,
+        used_count: 0,
+        expires_at: expiresDate
+      })
+      .returning('id');
+
+    const tempId = extractReturningId(insertResult);
+
+    await auditLog('TEMP_PASSWORD_CREATE', req.user.id, profileId, req.ip, {
+      temp_id: tempId,
+      max_uses: uses,
+      expires_at: expiresDate.toISOString()
+    });
+
+    console.log(`[Game] 用户 ${req.user.id} 为角色 ${profile.player_name} 创建临时密码 (id: ${tempId})`);
+
+    res.status(HTTP_STATUS.CREATED).json({
+      code: RESPONSE_CODES.SUCCESS,
+      data: {
+        id: tempId,
+        password: plainPassword,
+        max_uses: uses,
+        expires_at: expiresDate.toISOString()
+      },
+      message: '临时密码创建成功，请妥善保管'
+    });
+
+  } catch (error) {
+    console.error('[Game] 创建临时密码失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '创建失败，请稍后重试'
+    });
+  }
+});
+
+// 撤销临时密码
+router.delete('/profile/:id/temp-password/:tempId', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '用户认证信息无效，请重新登录'
+      });
+    }
+
+    const profileId = parseInt(req.params.id);
+    const tempId = parseInt(req.params.tempId);
+
+    const profile = await getProfileById(profileId);
+
+    if (!profile || !matchUserId(profile.user_id, req.user.id)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权操作此角色'
+      });
+    }
+
+    const db = getDB();
+
+    const tempPassword = await db('mc_temp_passwords')
+      .where({ id: tempId, profile_id: profileId })
+      .first();
+
+    if (!tempPassword) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        code: RESPONSE_CODES.NOT_FOUND,
+        message: '临时密码不存在'
+      });
+    }
+
+    if (tempPassword.is_revoked) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '该临时密码已被撤销'
+      });
+    }
+
+    await db('mc_temp_passwords')
+      .where({ id: tempId })
+      .update({
+        is_revoked: true,
+        revoked_at: new Date(),
+        revoke_reason: '用户手动撤销'
+      });
+
+    await auditLog('TEMP_PASSWORD_REVOKE', req.user.id, profileId, req.ip, {
+      temp_id: tempId
+    });
+
+    console.log(`[Game] 用户 ${req.user.id} 撤销临时密码 ${tempId}`);
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: '临时密码已撤销'
+    });
+
+  } catch (error) {
+    console.error('[Game] 撤销临时密码失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '撤销失败'
     });
   }
 });
