@@ -190,6 +190,32 @@ export const gameApi = {
       url: `/game/profile/${profileId}/temp-password/${tempId}`,
       method: 'delete'
     })
+  },
+
+  // ========== 会话管理 API ==========
+
+  // 获取会话列表
+  getSessions(profileId) {
+    return request({
+      url: `/game/profile/${profileId}/sessions`,
+      method: 'get'
+    })
+  },
+
+  // 踢出指定会话
+  kickSession(profileId, sessionId) {
+    return request({
+      url: `/game/profile/${profileId}/session/${sessionId}`,
+      method: 'delete'
+    })
+  },
+
+  // 踢出所有临时密码会话
+  kickAllTempSessions(profileId) {
+    return request({
+      url: `/game/profile/${profileId}/sessions/temp`,
+      method: 'delete'
+    })
   }
 }
 

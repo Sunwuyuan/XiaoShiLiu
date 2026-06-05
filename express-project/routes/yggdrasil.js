@@ -236,7 +236,9 @@ router.post('/authserver/authenticate', async (req, res) => {
       refreshToken,
       finalClientToken,
       req.ip,
-      req.headers['user-agent']
+      req.headers['user-agent'],
+      isTempPassword ? 'temp' : 'main',
+      isTempPassword ? tempPasswordRecord.id : null
     );
 
     await auditLog('LOGIN_SUCCESS', profile.user_id, profile.id, req.ip, {

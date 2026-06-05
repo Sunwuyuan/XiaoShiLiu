@@ -1524,7 +1524,7 @@ router.get('/profile/:id/temp-passwords', authenticateToken, async (req, res) =>
       .where({ profile_id: profileId })
       .where('is_revoked', false)
       .where('expires_at', '>', now)
-      .select('id', 'temp_password_plain', 'max_uses', 'used_count', 'expires_at', 'last_used_ip', 'last_used_at', 'created_at')
+      .select('id', 'temp_password_plain', 'max_uses', 'used_count', 'expires_at', 'last_used_ip', 'last_used_at', 'created_at', 'remark')
       .orderBy('created_at', 'desc');
 
     // 计算状态
@@ -1539,7 +1539,8 @@ router.get('/profile/:id/temp-passwords', authenticateToken, async (req, res) =>
       is_depleted: tp.used_count >= tp.max_uses,
       last_used_ip: tp.last_used_ip,
       last_used_at: tp.last_used_at,
-      created_at: tp.created_at
+      created_at: tp.created_at,
+      remark: tp.remark
     }));
 
     res.json({
@@ -1568,7 +1569,7 @@ router.post('/profile/:id/temp-password', authenticateToken, async (req, res) =>
     }
 
     const profileId = parseInt(req.params.id);
-    const { max_uses, expires_at } = req.body;
+    const { max_uses, expires_at, remark } = req.body;
 
     const profile = await getProfileById(profileId);
 
@@ -1640,7 +1641,8 @@ router.post('/profile/:id/temp-password', authenticateToken, async (req, res) =>
         temp_password_plain: plainPassword,
         max_uses: uses,
         used_count: 0,
-        expires_at: expiresDate
+        expires_at: expiresDate,
+        remark: (remark || '').trim().slice(0, 100) || null
       })
       .returning('id');
 
@@ -1660,7 +1662,8 @@ router.post('/profile/:id/temp-password', authenticateToken, async (req, res) =>
         id: tempId,
         password: plainPassword,
         max_uses: uses,
-        expires_at: expiresDate.toISOString()
+        expires_at: expiresDate.toISOString(),
+        remark: (remark || '').trim().slice(0, 100) || null
       },
       message: '临时密码创建成功，请妥善保管'
     });
@@ -1740,6 +1743,186 @@ router.delete('/profile/:id/temp-password/:tempId', authenticateToken, async (re
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
       code: RESPONSE_CODES.ERROR,
       message: '撤销失败'
+    });
+  }
+});
+
+// ========== 会话管理 ==========
+
+// 获取角色的活跃会话列表
+router.get('/profile/:id/sessions', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '用户认证信息无效，请重新登录'
+      });
+    }
+
+    const profileId = parseInt(req.params.id);
+    const profile = await getProfileById(profileId);
+
+    if (!profile || !matchUserId(profile.user_id, req.user.id)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权操作此角色'
+      });
+    }
+
+    const db = getDB();
+    const now = new Date();
+
+    const sessions = await db('yggdrasil_tokens')
+      .leftJoin('mc_temp_passwords as tp', 'yggdrasil_tokens.temp_password_id', 'tp.id')
+      .where('yggdrasil_tokens.profile_id', profileId)
+      .where('yggdrasil_tokens.expires_at', '>', now)
+      .select(
+        'yggdrasil_tokens.id',
+        'yggdrasil_tokens.auth_type',
+        'yggdrasil_tokens.temp_password_id',
+        'yggdrasil_tokens.ip_address',
+        'yggdrasil_tokens.user_agent',
+        'yggdrasil_tokens.created_at',
+        'yggdrasil_tokens.expires_at',
+        'yggdrasil_tokens.is_temporarily_invalidated',
+        'tp.remark as temp_remark',
+        'tp.temp_password_plain as temp_password'
+      )
+      .orderBy('yggdrasil_tokens.created_at', 'desc');
+
+    const formatted = sessions.map(s => ({
+      id: s.id,
+      auth_type: s.auth_type || 'main',
+      temp_password_id: s.temp_password_id,
+      temp_password: s.temp_password,
+      temp_remark: s.temp_remark,
+      ip_address: s.ip_address,
+      user_agent: s.user_agent,
+      created_at: s.created_at,
+      expires_at: s.expires_at,
+      is_invalidated: !!s.is_temporarily_invalidated
+    }));
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      data: formatted,
+      message: '获取成功'
+    });
+
+  } catch (error) {
+    console.error('[Game] 获取会话列表失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '服务器内部错误'
+    });
+  }
+});
+
+// 踢出指定会话
+router.delete('/profile/:id/session/:sessionId', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '用户认证信息无效，请重新登录'
+      });
+    }
+
+    const profileId = parseInt(req.params.id);
+    const sessionId = parseInt(req.params.sessionId);
+
+    const profile = await getProfileById(profileId);
+
+    if (!profile || !matchUserId(profile.user_id, req.user.id)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权操作此角色'
+      });
+    }
+
+    const db = getDB();
+
+    const session = await db('yggdrasil_tokens')
+      .where({ id: sessionId, profile_id: profileId })
+      .first();
+
+    if (!session) {
+      return res.status(HTTP_STATUS.NOT_FOUND).json({
+        code: RESPONSE_CODES.NOT_FOUND,
+        message: '会话不存在'
+      });
+    }
+
+    await db('yggdrasil_tokens')
+      .where({ id: sessionId })
+      .delete();
+
+    await auditLog('SESSION_KICK', req.user.id, profileId, req.ip, {
+      session_id: sessionId,
+      kicked_ip: session.ip_address,
+      kicked_auth_type: session.auth_type
+    });
+
+    console.log(`[Game] 用户 ${req.user.id} 踢出会话 ${sessionId}`);
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: '会话已踢出'
+    });
+
+  } catch (error) {
+    console.error('[Game] 踢出会话失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '踢出失败'
+    });
+  }
+});
+
+// 踢出所有临时密码会话
+router.delete('/profile/:id/sessions/temp', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        code: RESPONSE_CODES.UNAUTHORIZED,
+        message: '用户认证信息无效，请重新登录'
+      });
+    }
+
+    const profileId = parseInt(req.params.id);
+    const profile = await getProfileById(profileId);
+
+    if (!profile || !matchUserId(profile.user_id, req.user.id)) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({
+        code: RESPONSE_CODES.FORBIDDEN,
+        message: '无权操作此角色'
+      });
+    }
+
+    const db = getDB();
+    const now = new Date();
+
+    const result = await db('yggdrasil_tokens')
+      .where({ profile_id: profileId, auth_type: 'temp' })
+      .where('expires_at', '>', now)
+      .delete();
+
+    await auditLog('SESSION_KICK_ALL_TEMP', req.user.id, profileId, req.ip, {
+      kicked_count: result
+    });
+
+    console.log(`[Game] 用户 ${req.user.id} 踢出 ${result} 个临时密码会话`);
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: `已踢出 ${result} 个临时密码会话`
+    });
+
+  } catch (error) {
+    console.error('[Game] 批量踢出临时会话失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '操作失败'
     });
   }
 });

@@ -22,7 +22,8 @@ const newlyCreated = ref(null)
 // 创建表单
 const form = reactive({
   max_uses: 1,
-  expires_at: ''
+  expires_at: '',
+  remark: ''
 })
 
 // 计算默认过期时间（24小时后）
@@ -75,7 +76,8 @@ async function handleCreate() {
     const expiresDate = parseLocalDateTimeInput(form.expires_at)
     const res = await gameApi.createTempPassword(props.profile.id, {
       max_uses: parseInt(form.max_uses),
-      expires_at: expiresDate.toISOString()
+      expires_at: expiresDate.toISOString(),
+      remark: form.remark.trim() || null
     })
 
     if (res.success) {
@@ -85,6 +87,7 @@ async function handleCreate() {
       showCreateForm.value = false
       form.max_uses = 1
       form.expires_at = defaultExpiresAt.value
+      form.remark = ''
     } else {
       messageManager.error(res.message || '创建失败')
     }
@@ -219,6 +222,16 @@ function formatDateTime(dateString) {
               {{ isCreating ? '创建中...' : '创建临时密码' }}
             </button>
           </div>
+          <div class="form-group remark-group">
+            <label>备注（可选）</label>
+            <input
+              v-model="form.remark"
+              type="text"
+              maxlength="100"
+              placeholder="例如：给小明用"
+            />
+            <p class="hint">方便识别临时密码的用途</p>
+          </div>
         </div>
 
         <!-- 创建按钮 -->
@@ -260,6 +273,7 @@ function formatDateTime(dateString) {
                     <SvgIcon name="copy" />
                   </button>
                 </div>
+                <p v-if="item.remark" class="item-remark">{{ item.remark }}</p>
                 <div class="item-meta">
                   <span class="meta-tag uses">
                     <SvgIcon name="play" />
@@ -663,6 +677,17 @@ function formatDateTime(dateString) {
 .item-main {
   flex: 1;
   min-width: 0;
+}
+
+.remark-group {
+  margin-top: 12px;
+}
+
+.item-remark {
+  font-size: 13px;
+  color: var(--text-color-secondary);
+  margin: 0 0 8px 0;
+  padding-left: 2px;
 }
 
 .item-header {

@@ -289,7 +289,7 @@ async function getProfileById(profileId) {
  * @param {string} ipAddress - IP地址
  * @param {string} userAgent - 用户代理
  */
-async function saveTokens(profileId, accessToken, refreshToken, clientToken, ipAddress = null, userAgent = null) {
+async function saveTokens(profileId, accessToken, refreshToken, clientToken, ipAddress = null, userAgent = null, authType = 'main', tempPasswordId = null) {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const db = getDbInstance();
   const MAX_TOKENS = 10;
@@ -329,7 +329,9 @@ async function saveTokens(profileId, accessToken, refreshToken, clientToken, ipA
       client_token: clientToken,
       expires_at: expiresAt,
       ip_address: ipAddress,
-      user_agent: userAgent
+      user_agent: userAgent,
+      auth_type: authType,
+      temp_password_id: tempPasswordId
     });
   });
 }

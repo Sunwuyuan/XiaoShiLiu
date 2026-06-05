@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { gameApi } from '@/api/game'
 import EditProfileModal from './EditProfileModal.vue'
 import TempPasswordModal from './TempPasswordModal.vue'
+import SessionModal from './SessionModal.vue'
 import SkinWardrobe from '@/components/SkinWardrobe.vue'
 import messageManager from '@/utils/messageManager'
 import SvgIcon from '@/components/SvgIcon.vue'
@@ -19,6 +20,7 @@ const emit = defineEmits(['update', 'delete'])
 
 const showEditModal = ref(false)
 const showTempPasswordModal = ref(false)
+const showSessionModal = ref(false)
 const showWardrobe = ref(false)
 const isDeleting = ref(false)
 
@@ -108,6 +110,15 @@ function copyToClipboard(text) {
 
         <button
           v-if="!isBanned"
+          class="action-btn session-btn"
+          @click="showSessionModal = true"
+          title="会话管理"
+        >
+          <SvgIcon name="shield" />
+        </button>
+
+        <button
+          v-if="!isBanned"
           class="action-btn wardrobe-btn"
           @click="showWardrobe = !showWardrobe"
           title="皮肤衣柜"
@@ -182,6 +193,14 @@ function copyToClipboard(text) {
         v-if="showTempPasswordModal"
         :profile="profile"
         @close="showTempPasswordModal = false"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <SessionModal
+        v-if="showSessionModal"
+        :profile="profile"
+        @close="showSessionModal = false"
       />
     </Teleport>
 
@@ -309,6 +328,10 @@ function copyToClipboard(text) {
 
 .temp-password-btn:hover:not(:disabled) {
   color: #8b5cf6;
+}
+
+.session-btn:hover:not(:disabled) {
+  color: #059669;
 }
 
 .wardrobe-btn:hover:not(:disabled) {
