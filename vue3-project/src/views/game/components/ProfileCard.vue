@@ -92,7 +92,7 @@ function copyToClipboard(text) {
       
       <div class="player-info">
         <h3 class="player-name" @click="copyToClipboard(profile.player_name + '@dy.ci')">
-          {{ profile.player_name }}@dy.ci
+          <span class="name-text">{{ profile.player_name }}@dy.ci</span>
           <SvgIcon name="copy" class="copy-icon" />
         </h3>
         <p
@@ -265,6 +265,8 @@ function copyToClipboard(text) {
 .player-info {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  padding-right: 8px;
 }
 
 .player-name {
@@ -276,6 +278,14 @@ function copyToClipboard(text) {
   display: flex;
   align-items: center;
   gap: 6px;
+  overflow: hidden;
+}
+
+.name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .player-name .copy-icon {
