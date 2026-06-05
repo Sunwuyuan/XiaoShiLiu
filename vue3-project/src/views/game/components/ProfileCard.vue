@@ -90,7 +90,10 @@ function copyToClipboard(text) {
       <div class="player-avatar" :style="{ backgroundImage: `url(${avatarSkinUrl})` }"></div>
       
       <div class="player-info">
-        <h3 class="player-name">{{ profile.player_name }}@dy.ci</h3>
+        <h3 class="player-name" @click="copyToClipboard(profile.player_name + '@dy.ci')">
+          {{ profile.player_name }}@dy.ci
+          <SvgIcon name="copy" class="copy-icon" />
+        </h3>
         <p class="uuid-text" @click="copyToClipboard(profile.uuid)">
           {{ profile.uuid }}
           <SvgIcon name="copy" class="copy-icon" />
@@ -262,6 +265,22 @@ function copyToClipboard(text) {
   font-weight: 600;
   color: var(--text-color-primary);
   margin: 0 0 4px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.player-name .copy-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-color-tertiary);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.player-name:hover .copy-icon {
+  opacity: 1;
 }
 
 .uuid-text {

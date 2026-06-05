@@ -276,11 +276,9 @@ function formatDateTime(dateString) {
                 <p v-if="item.remark" class="item-remark">{{ item.remark }}</p>
                 <div class="item-meta">
                   <span class="meta-tag uses">
-                    <SvgIcon name="play" />
                     {{ item.used_count }} / {{ item.max_uses }} 次
                   </span>
                   <span class="meta-tag expires" :class="{ 'urgent': item.remaining_uses <= 0 || new Date(item.expires_at) <= new Date() }">
-                    <SvgIcon name="clock" />
                     {{ formatTime(item.expires_at) }}
                   </span>
                   <span v-if="item.last_used_at" class="meta-tag last-used">
