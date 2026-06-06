@@ -59,20 +59,73 @@ const canvasRef = ref(null)
 const currentAnimation = ref(props.defaultAnimation)
 let viewer = null
 
-// 获取代理 URL（解决 CORS 问题）
-function getProxyUrl(url) {
+// 缓存 URL 可用性检测结果
+const urlAvailabilityCache = new Map()
+
+/**
+ * 测试图片 URL 是否可以直接访问（不跨域或 CORS 允许）
+ * @param {string} url
+ * @returns {Promise<boolean>} true=直链可用, false=需要走代理
+ */
+function testDirectUrl(url) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    let resolved = false
+
+    const done = (ok) => {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timer)
+      img.onload = img.onerror = null
+      resolve(ok)
+    }
+
+    // 超时 3 秒
+    const timer = setTimeout(() => done(false), 3000)
+
+    img.onload = () => done(true)
+    img.onerror = () => done(false)
+
+    // 跨域请求，用于检测 CORS
+    img.crossOrigin = 'anonymous'
+    img.src = url
+  })
+}
+
+/**
+ * 获取皮肤/披风 URL
+ * 策略：先尝试直链，失败后再走代理
+ * @param {string} url
+ * @returns {Promise<string>}
+ */
+async function getResolvedUrl(url) {
   if (!url) return ''
-  // 如果是同源 URL，不需要代理
+
+  // 同源 URL 直接返回
   try {
     const urlObj = new URL(url)
     if (urlObj.origin === window.location.origin) {
       return url
     }
   } catch (e) {
-    // 相对 URL，同源
     return url
   }
-  // 跨域 URL，走代理
+
+  // 检查缓存
+  const cached = urlAvailabilityCache.get(url)
+  if (cached !== undefined) {
+    return cached ? url : `/api/game/skin-proxy?url=${encodeURIComponent(url)}`
+  }
+
+  // 测试直链是否可用
+  const directOk = await testDirectUrl(url)
+  urlAvailabilityCache.set(url, directOk)
+
+  if (directOk) {
+    return url
+  }
+
+  // 直链不可用，走代理
   return `/api/game/skin-proxy?url=${encodeURIComponent(url)}`
 }
 
@@ -107,7 +160,7 @@ function switchAnimation(key) {
   }
 }
 
-function initViewer() {
+async function initViewer() {
   if (!canvasRef.value) return
 
   const options = {
@@ -118,15 +171,15 @@ function initViewer() {
     animation: createAnimation(props.defaultAnimation)
   }
 
-  // 如果有皮肤URL则加载（走代理解决CORS）
+  // 如果有皮肤URL则加载（先尝试直链，失败再走代理）
   if (props.skinUrl) {
-    options.skin = getProxyUrl(props.skinUrl)
+    options.skin = await getResolvedUrl(props.skinUrl)
     options.model = props.skinModel === 'slim' ? 'slim' : (props.skinModel === 'classic' ? 'default' : 'auto-detect')
   }
 
-  // 如果有披风URL则加载（走代理解决CORS）
+  // 如果有披风URL则加载（先尝试直链，失败再走代理）
   if (props.capeUrl) {
-    options.cape = getProxyUrl(props.capeUrl)
+    options.cape = await getResolvedUrl(props.capeUrl)
   }
 
   viewer = new skinview3d.SkinViewer(options)
@@ -146,7 +199,8 @@ async function loadSkin(url) {
   if (!viewer) return
   if (url) {
     try {
-      await viewer.loadSkin(getProxyUrl(url), {
+      const resolvedUrl = await getResolvedUrl(url)
+      await viewer.loadSkin(resolvedUrl, {
         model: props.skinModel === 'slim' ? 'slim' : (props.skinModel === 'classic' ? 'default' : 'auto-detect')
       })
     } catch (e) {
@@ -161,7 +215,8 @@ async function loadCape(url) {
   if (!viewer) return
   if (url) {
     try {
-      await viewer.loadCape(getProxyUrl(url))
+      const resolvedUrl = await getResolvedUrl(url)
+      await viewer.loadCape(resolvedUrl)
     } catch (e) {
       console.warn('[SkinViewer3D] 披风加载失败:', e)
     }
