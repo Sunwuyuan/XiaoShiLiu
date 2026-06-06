@@ -28,6 +28,8 @@ const {
  * @param {Function} config.beforeCreate - 创建前的自定义验证
  * @param {Function} config.beforeUpdate - 更新前的自定义验证
  * @param {Function} config.beforeDelete - 删除前的自定义验证
+ * @param {Function} config.beforeDeleteMany - 批量删除前的自定义验证
+ * @param {Object} config.customQueries - 自定义查询（getOne/getList）
  * @param {Object} config.searchFields - 搜索字段配置
  * @param {string} config.defaultOrderBy - 默认排序
  */
@@ -44,6 +46,8 @@ function createCrudHandlers(config) {
     beforeUpdate,
     afterUpdate,
     beforeDelete,
+    beforeDeleteMany,
+    customQueries,
     searchFields = {},
     defaultOrderBy = 'created_at DESC'
   } = config
@@ -72,9 +76,9 @@ function createCrudHandlers(config) {
       if (beforeCreate) {
         const customValidation = await beforeCreate(data, req)
         if (!customValidation.isValid) {
-          return error(res, 
-            customValidation.message, 
-            customValidation.code || RESPONSE_CODES.VALIDATION_ERROR, 
+          return error(res,
+            customValidation.message,
+            customValidation.code || RESPONSE_CODES.VALIDATION_ERROR,
             customValidation.statusCode || HTTP_STATUS.BAD_REQUEST)
         }
       }
@@ -125,9 +129,9 @@ function createCrudHandlers(config) {
       if (beforeUpdate) {
         const customValidation = await beforeUpdate(updateData, id, req)
         if (!customValidation.isValid) {
-          return error(res, 
-            customValidation.message, 
-            customValidation.code || RESPONSE_CODES.VALIDATION_ERROR, 
+          return error(res,
+            customValidation.message,
+            customValidation.code || RESPONSE_CODES.VALIDATION_ERROR,
             customValidation.statusCode || HTTP_STATUS.BAD_REQUEST)
         }
       }
@@ -162,9 +166,9 @@ function createCrudHandlers(config) {
       if (beforeDelete) {
         const customValidation = await beforeDelete(id, req)
         if (!customValidation.isValid) {
-          return error(res, 
-            customValidation.message, 
-            customValidation.code || RESPONSE_CODES.VALIDATION_ERROR, 
+          return error(res,
+            customValidation.message,
+            customValidation.code || RESPONSE_CODES.VALIDATION_ERROR,
             customValidation.statusCode || HTTP_STATUS.BAD_REQUEST)
         }
       }
@@ -202,14 +206,22 @@ function createCrudHandlers(config) {
         return error(res, `部分${name}不存在: ${missingValues.join(', ')}`, RESPONSE_CODES.NOT_FOUND, HTTP_STATUS.NOT_FOUND)
       }
 
-      // 自定义验证
-      if (beforeDelete) {
+      // 批量删除前的自定义验证（优先使用 beforeDeleteMany，否则逐个调用 beforeDelete）
+      if (beforeDeleteMany) {
+        const customValidation = await beforeDeleteMany(ids, req)
+        if (customValidation && !customValidation.isValid) {
+          return error(res,
+            customValidation.message,
+            customValidation.code || RESPONSE_CODES.VALIDATION_ERROR,
+            customValidation.statusCode || HTTP_STATUS.BAD_REQUEST)
+        }
+      } else if (beforeDelete) {
         for (const id of ids) {
           const customValidation = await beforeDelete(id, req)
           if (!customValidation.isValid) {
-            return error(res, 
-              customValidation.message, 
-              customValidation.code || RESPONSE_CODES.VALIDATION_ERROR, 
+            return error(res,
+              customValidation.message,
+              customValidation.code || RESPONSE_CODES.VALIDATION_ERROR,
               customValidation.statusCode || HTTP_STATUS.BAD_REQUEST)
           }
         }
@@ -236,6 +248,15 @@ function createCrudHandlers(config) {
     try {
       const id = req.params.id
 
+      // 优先使用自定义查询
+      if (customQueries && customQueries.getOne) {
+        const record = await customQueries.getOne(req)
+        if (!record) {
+          return error(res, `${name}不存在`, RESPONSE_CODES.NOT_FOUND, HTTP_STATUS.NOT_FOUND)
+        }
+        return success(res, record)
+      }
+
       const record = await getRecord(table, id)
       if (!record) {
         return error(res, `${name}不存在`, RESPONSE_CODES.NOT_FOUND, HTTP_STATUS.NOT_FOUND)
@@ -252,6 +273,12 @@ function createCrudHandlers(config) {
    */
   const getList = async (req, res) => {
     try {
+      // 优先使用自定义查询
+      if (customQueries && customQueries.getList) {
+        const result = await customQueries.getList(req)
+        return success(res, result)
+      }
+
       const page = parseInt(req.query.page) || 1
       const limit = parseInt(req.query.limit) || 20
 

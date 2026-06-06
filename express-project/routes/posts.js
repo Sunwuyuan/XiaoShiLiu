@@ -321,6 +321,81 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
+// 搜索笔记（必须在 /:id 路由之前注册，否则 "search" 会被当作 id 参数）
+router.get('/search', optionalAuth, async (req, res) => {
+  try {
+    const db = getDB();
+    const keyword = req.query.keyword;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+    const currentUserId = req.user ? req.user.id : null;
+
+    if (!keyword) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '请输入搜索关键词' });
+    }
+
+    console.log(`🔍 搜索笔记 - 关键词: ${keyword}, 页码: ${page}, 每页: ${limit}, 当前用户ID: ${currentUserId}`);
+
+    const kwPattern = `%${keyword}%`;
+
+    // 搜索笔记
+    const rows = await db({ p: 'posts' })
+      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
+      .where('p.status', 0)
+      .where(function() {
+        this.where('p.title', 'like', kwPattern)
+            .orWhere('p.content', 'like', kwPattern);
+      })
+      .select(
+        'p.*',
+        'u.nickname',
+        'u.avatar as user_avatar',
+        'u.user_id as author_account',
+        'u.id as author_auto_id',
+        'u.location',
+        'u.verified'
+      )
+      .orderBy('p.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
+
+    await enrichPostsWithDetails(db, rows, currentUserId);
+
+    // 获取总数
+    const countResult = await db('posts')
+      .where({ status: 0 })
+      .where(function() {
+        this.where('title', 'like', kwPattern)
+            .orWhere('content', 'like', kwPattern);
+      })
+      .count('* as total')
+      .first();
+
+    const total = parseInt(countResult.total);
+
+    console.log(`  搜索笔记结果 - 找到 ${total} 个笔记，当前页 ${rows.length} 个`);
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: 'success',
+      data: {
+        posts: rows,
+        keyword,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('搜索笔记失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
+  }
+});
+
 // 获取笔记详情
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
@@ -562,81 +637,6 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('创建笔记失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
-  }
-});
-
-// 搜索笔记
-router.get('/search', optionalAuth, async (req, res) => {
-  try {
-    const db = getDB();
-    const keyword = req.query.keyword;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const offset = (page - 1) * limit;
-    const currentUserId = req.user ? req.user.id : null;
-
-    if (!keyword) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '请输入搜索关键词' });
-    }
-
-    console.log(`🔍 搜索笔记 - 关键词: ${keyword}, 页码: ${page}, 每页: ${limit}, 当前用户ID: ${currentUserId}`);
-
-    const kwPattern = `%${keyword}%`;
-
-    // 搜索笔记
-    const rows = await db({ p: 'posts' })
-      .leftJoin({ u: 'users' }, 'p.user_id', 'u.id')
-      .where('p.status', 0)
-      .where(function() {
-        this.where('p.title', 'like', kwPattern)
-            .orWhere('p.content', 'like', kwPattern);
-      })
-      .select(
-        'p.*',
-        'u.nickname',
-        'u.avatar as user_avatar',
-        'u.user_id as author_account',
-        'u.id as author_auto_id',
-        'u.location',
-        'u.verified'
-      )
-      .orderBy('p.created_at', 'desc')
-      .limit(limit)
-      .offset(offset);
-
-    await enrichPostsWithDetails(db, rows, currentUserId);
-
-    // 获取总数
-    const countResult = await db('posts')
-      .where({ status: 0 })
-      .where(function() {
-        this.where('title', 'like', kwPattern)
-            .orWhere('content', 'like', kwPattern);
-      })
-      .count('* as total')
-      .first();
-
-    const total = parseInt(countResult.total);
-
-    console.log(`  搜索笔记结果 - 找到 ${total} 个笔记，当前页 ${rows.length} 个`);
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: 'success',
-      data: {
-        posts: rows,
-        keyword,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
-      }
-    });
-  } catch (error) {
-    console.error('搜索笔记失败:', error);
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
   }
 });

@@ -343,7 +343,9 @@ const postsCrudConfig = {
 
       // 减少原有标签的使用次数
       for (const oldTag of oldTags) {
-        await db('tags').where({ id: oldTag.tag_id }).decrement('use_count', 1)
+        await db('tags').where({ id: oldTag.tag_id }).update({
+          use_count: db.raw('GREATEST(use_count - 1, 0)')
+        })
       }
 
       // 处理新标签
@@ -405,7 +407,9 @@ const postsCrudConfig = {
 
     // 减少标签使用次数
     for (const tag of tagResult) {
-      await db('tags').where({ id: String(tag.tag_id) }).decrement('use_count', 1)
+      await db('tags').where({ id: String(tag.tag_id) }).update({
+        use_count: db.raw('GREATEST(use_count - 1, 0)')
+      })
     }
     // 返回验证结果
     return { isValid: true }
@@ -419,7 +423,9 @@ const postsCrudConfig = {
 
     // 减少标签使用次数
     for (const tag of tagResult) {
-      await db('tags').where({ id: String(tag.tag_id) }).decrement('use_count', 1)
+      await db('tags').where({ id: String(tag.tag_id) }).update({
+        use_count: db.raw('GREATEST(use_count - 1, 0)')
+      })
     }
   },
 
@@ -1103,7 +1109,7 @@ const tagsCrudConfig = {
   table: 'tags',
   name: '标签',
   requiredFields: ['name'],
-  updateFields: ['name', 'description'],
+  updateFields: ['name'],
   uniqueFields: ['name'],
   cascadeRules: [
     { table: 'post_tags', field: 'tag_id' }
@@ -1112,7 +1118,21 @@ const tagsCrudConfig = {
     name: { operator: 'LIKE' }
   },
   allowedSortFields: ['id', 'use_count', 'created_at'],
-  defaultOrderBy: 'created_at DESC'
+  defaultOrderBy: 'created_at DESC',
+
+  // 创建/更新/删除标签后清除前台标签缓存
+  afterCreate: async () => {
+    const { delCachePattern } = require('../utils/redis');
+    await delCachePattern('tags:*').catch(() => {});
+  },
+  afterUpdate: async () => {
+    const { delCachePattern } = require('../utils/redis');
+    await delCachePattern('tags:*').catch(() => {});
+  },
+  afterDelete: async () => {
+    const { delCachePattern } = require('../utils/redis');
+    await delCachePattern('tags:*').catch(() => {});
+  }
 }
 
 // 生成标签CRUD处理器
@@ -2998,6 +3018,7 @@ const categoriesCrudConfig = {
   // 更新前的自定义验证
   beforeUpdate: async (data, id, req) => {
     const { name, category_title } = data
+    const db = getDB();
 
     if (name && name.trim() === '') {
       return { isValid: false, message: '分类名称不能为空' }
@@ -3009,7 +3030,6 @@ const categoriesCrudConfig = {
 
     if (name) {
       // 检查分类名称是否已存在（排除当前记录）
-      const db = getDB();
       const existingName = await db('categories').where({ name: name.trim() }).whereNot({ id: id }).select('id')
 
       if (existingName.length > 0) {
