@@ -51,12 +51,12 @@
         </div>
 
         <!-- 操作按钮组 -->
-        <div class="action-buttons" v-if="!item.is_active">
-          <button class="btn btn-primary btn-xs" @click="equipSkin(item)" :disabled="isEquipping">
+        <div class="action-buttons">
+          <button v-if="!item.is_active" class="btn btn-primary btn-xs" @click="equipSkin(item)" :disabled="isEquipping">
             {{ isEquipping ? '切换中...' : '穿戴' }}
           </button>
           <button class="btn btn-secondary btn-xs" @click="editItem(item)">编辑</button>
-          <button class="btn btn-danger btn-xs" @click="deleteItem(item)">删除</button>
+          <button v-if="!item.is_active" class="btn btn-danger btn-xs" @click="deleteItem(item)">删除</button>
         </div>
       </div>
     </div>
@@ -124,7 +124,10 @@
             </div>
 
             <div class="form-group">
-              <label>披风文件（可选）</label>
+              <label>
+                披风文件（可选）
+                <span v-if="editingItem && editingItem.cape_url && !formData.deleteCape" class="cape-exists-tag">已设置披风</span>
+              </label>
               <div class="file-input-wrapper">
                 <input
                   type="file"
@@ -132,14 +135,20 @@
                   @change="handleCapeUpload"
                 />
                 <label for="wardrobe-cape-file" class="file-label small">
-                  {{ formData.capeFile ? formData.capeFile.name : '选择披风文件（可选）' }}
+                  <span v-if="formData.capeFile">{{ formData.capeFile.name }}</span>
+                  <span v-else-if="editingItem && editingItem.cape_url && !formData.deleteCape">点击选择新披风文件以替换当前披风</span>
+                  <span v-else>选择披风文件（可选）</span>
                 </label>
                 <p v-if="formData.capeFile" class="file-selected">
-                  已选择: {{ formData.capeFile.name }} ({{ (formData.capeFile.size / 1024).toFixed(1) }}KB)
+                  新披风: {{ formData.capeFile.name }} ({{ (formData.capeFile.size / 1024).toFixed(1) }}KB)
+                  <button type="button" class="clear-file-btn" @click="clearCapeFile">取消</button>
+                </p>
+                <p v-else-if="editingItem && editingItem.cape_url && !formData.deleteCape" class="current-cape-hint">
+                  当前披风将保留，选择新文件可直接替换
                 </p>
               </div>
               <!-- 编辑模式下，如果已有披风，显示删除选项 -->
-              <div v-if="editingItem && editingItem.cape_url && !formData.deleteCape" class="cape-actions">
+              <div v-if="editingItem && editingItem.cape_url && !formData.deleteCape && !formData.capeFile" class="cape-actions">
                 <label class="delete-cape-checkbox">
                   <input type="checkbox" v-model="formData.deleteCape" />
                   <span>删除当前披风</span>
@@ -269,6 +278,12 @@ function handleCapeUpload(event) {
   }
 
   formData.capeFile = file
+}
+
+function clearCapeFile() {
+  formData.capeFile = null
+  const capeInput = document.getElementById('wardrobe-cape-file')
+  if (capeInput) capeInput.value = ''
 }
 
 async function handleSubmit() {
@@ -810,6 +825,41 @@ function formatTime(dateString) {
 }
 
 .undo-btn:hover {
+  opacity: 0.8;
+}
+
+/* 已有披风标签 */
+.cape-exists-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  background: var(--primary-color-light, #dbeafe);
+  color: var(--primary-color-dark, #1e40af);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 当前披风提示 */
+.current-cape-hint {
+  font-size: 12px;
+  color: var(--text-color-tertiary);
+  margin-top: 6px;
+}
+
+/* 清除文件按钮 */
+.clear-file-btn {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  margin-left: 8px;
+  padding: 0;
+}
+
+.clear-file-btn:hover {
   opacity: 0.8;
 }
 

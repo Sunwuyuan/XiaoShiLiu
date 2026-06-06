@@ -54,9 +54,8 @@ export const gameApi = {
       url: `/game/profile/${profileId}/skin`,
       method: 'post',
       data: formData,
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
+      // 注意：不能手动设置 Content-Type，否则 boundary 会丢失，multer 无法解析
+      headers: {},
       timeout: 30000
     })
   },
@@ -76,9 +75,8 @@ export const gameApi = {
       url: `/game/profile/${profileId}/cape`,
       method: 'post',
       data: formData,
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
+      // 注意：不能手动设置 Content-Type，否则 boundary 会丢失，multer 无法解析
+      headers: {},
       timeout: 30000
     })
   },
@@ -124,24 +122,22 @@ export const gameApi = {
       url: `/game/profile/${profileId}/wardrobe`,
       method: 'post',
       data: formData,
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
+      // 注意：不能手动设置 Content-Type，否则 boundary 会丢失，multer 无法解析
+      headers: {},
       timeout: 60000
     })
   },
 
   // 更新衣柜项（支持改名、换模型、重新上传皮肤/披风文件）
   updateWardrobeItem(profileId, itemId, data) {
-    // 如果 data 是 FormData（包含文件上传），使用 multipart/form-data
+    // 如果 data 是 FormData（包含文件上传），让浏览器自动设置 Content-Type（带 boundary）
     const isFormData = data instanceof FormData
     return request({
       url: `/game/profile/${profileId}/wardrobe/${itemId}`,
       method: 'put',
       data,
-      headers: isFormData ? {
-        'Content-Type': 'multipart/form-data'
-      } : undefined,
+      // 注意：不能手动设置 Content-Type，否则 boundary 会丢失，multer 无法解析
+      headers: isFormData ? {} : undefined,
       timeout: isFormData ? 60000 : 10000
     })
   },
