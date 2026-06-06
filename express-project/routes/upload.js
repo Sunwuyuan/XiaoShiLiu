@@ -110,10 +110,9 @@ router.post('/single', authenticateToken, upload.single('file'), async (req, res
 router.post('/multiple', authenticateToken, upload.array('files', 9), async (req, res) => {
   try {
     if (!Array.isArray(req.files) || req.files.length === 0) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ 
-        success: false, 
-        data: null, 
-        message: '没有上传文件' 
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '没有上传文件'
       });
     }
 
@@ -141,10 +140,9 @@ router.post('/multiple', authenticateToken, upload.array('files', 9), async (req
     }
 
     if (uploadResults.length === 0) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ 
-        success: false, 
-        data: null, 
-        message: '所有图片上传失败' 
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        code: RESPONSE_CODES.VALIDATION_ERROR,
+        message: '所有图片上传失败'
       });
     }
 
@@ -152,22 +150,21 @@ router.post('/multiple', authenticateToken, upload.array('files', 9), async (req
     console.log(`多图片上传成功 - 用户ID: ${req.user.id}, 文件数量: ${uploadResults.length}`);
 
     res.json({
-      success: true,
+      code: RESPONSE_CODES.SUCCESS,
+      message: errors.length === 0 ? '所有图片上传成功' : `${uploadResults.length}张上传成功，${errors.length}张失败`,
       data: {
         uploaded: uploadResults,
         errors,
         total: files.length,
         successCount: uploadResults.length,
         errorCount: errors.length
-      },
-      message: errors.length === 0 ? '所有图片上传成功' : `${uploadResults.length}张上传成功，${errors.length}张失败`
+      }
     });
   } catch (error) {
     console.error('多图片上传失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ 
-      success: false, 
-      data: null, 
-      message: '上传失败' 
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '上传失败'
     });
   }
 });

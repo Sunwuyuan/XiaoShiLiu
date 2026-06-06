@@ -51,6 +51,27 @@ router.post('/', authenticateToken, async (req, res) => {
         }
       });
 
+      // 删除点赞通知
+      try {
+        let notificationType;
+        if (target_type == 1) {
+          notificationType = NotificationHelper.TYPES.LIKE_POST;
+        } else if (target_type == 2) {
+          notificationType = NotificationHelper.TYPES.LIKE_COMMENT;
+        }
+        if (notificationType) {
+          await db('notifications')
+            .where({
+              sender_id: String(userId),
+              target_id: String(target_id),
+              type: notificationType
+            })
+            .del();
+        }
+      } catch (notifyError) {
+        console.error('删除点赞通知失败:', notifyError.message);
+      }
+
       console.log(`取消点赞成功 - 用户ID: ${userId}`);
       res.json({ code: RESPONSE_CODES.SUCCESS, message: '取消点赞成功', data: { liked: false } });
     } else {
@@ -159,6 +180,27 @@ router.delete('/', authenticateToken, async (req, res) => {
         await trx('comments').where({ id: String(target_id) }).decrement('like_count', 1);
       }
     });
+
+    // 删除点赞通知
+    try {
+      let notificationType;
+      if (target_type == 1) {
+        notificationType = NotificationHelper.TYPES.LIKE_POST;
+      } else if (target_type == 2) {
+        notificationType = NotificationHelper.TYPES.LIKE_COMMENT;
+      }
+      if (notificationType) {
+        await db('notifications')
+          .where({
+            sender_id: String(userId),
+            target_id: String(target_id),
+            type: notificationType
+          })
+          .del();
+      }
+    } catch (notifyError) {
+      console.error('删除点赞通知失败:', notifyError.message);
+    }
 
     console.log(`取消点赞成功 - 用户ID: ${userId}`);
     res.json({ code: RESPONSE_CODES.SUCCESS, message: '取消点赞成功' });

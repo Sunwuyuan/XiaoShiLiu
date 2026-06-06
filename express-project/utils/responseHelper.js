@@ -13,11 +13,8 @@ const { HTTP_STATUS, RESPONSE_CODES } = require('../constants')
 function success(res, data = null, message = '操作成功', code = RESPONSE_CODES.SUCCESS) {
   const response = {
     code,
-    message
-  }
-
-  if (data !== null) {
-    response.data = data
+    message,
+    data: data !== null ? data : null
   }
 
   res.status(HTTP_STATUS.OK).json(response)

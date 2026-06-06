@@ -255,7 +255,7 @@ router.get('/:id', async (req, res) => {
       .where('u.user_id', userIdParam)
       .select(
         'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
-        'u.email', 'u.gender', 'u.zodiac_sign', 'u.mbti', 'u.education',
+        'u.gender', 'u.zodiac_sign', 'u.mbti', 'u.education',
         'u.major', 'u.interests', 'u.follow_count', 'u.fans_count',
         'u.like_count', 'u.created_at', 'u.verified', 'uv.title as verified_title'
       )
@@ -358,9 +358,12 @@ router.get('/:id/posts', optionalAuth, async (req, res) => {
       .leftJoin({ c: 'categories' }, 'p.category_id', 'c.id')
       .where('p.user_id', String(userId));
 
-    // 根据status参数决定查询哪些状态
-    if (statusFilter === 'all') {
-      query = query.whereIn('p.status', [0, 2, 3]);
+    // 根据status参数决定查询哪些状态（仅允许本人查看非公开笔记）
+    if (statusFilter === 'all' && currentUserId && String(currentUserId) === String(userId)) {
+      query = query.whereIn('p.status', [0, 1, 2, 3]);
+    } else if (statusFilter === '1' && currentUserId && String(currentUserId) === String(userId)) {
+      // 仅本人可查看草稿
+      query = query.where('p.status', 1);
     } else {
       query = query.where('p.status', 0);
     }
@@ -557,12 +560,12 @@ router.post('/:id/follow', authenticateToken, async (req, res) => {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '已经关注了该用户' });
     }
 
-    // 添加关注记录
-    await db('follows').insert({ follower_id: String(followerId), following_id: String(userId) });
-
-    // 更新关注者的关注数和被关注者的粉丝数
-    await db('users').where({ id: followerId }).increment('follow_count', 1);
-    await db('users').where({ id: userId }).increment('fans_count', 1);
+    // 添加关注记录 + 更新计数（使用事务保证一致性）
+    await db.transaction(async (trx) => {
+      await trx('follows').insert({ follower_id: String(followerId), following_id: String(userId) });
+      await trx('users').where({ id: followerId }).increment('follow_count', 1);
+      await trx('users').where({ id: userId }).increment('fans_count', 1);
+    });
 
     // 创建关注通知
     try {
@@ -593,18 +596,14 @@ router.delete('/:id/follow', authenticateToken, async (req, res) => {
       return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '用户不存在' });
     }
 
-    // 删除关注记录
-    const result = await db('follows')
-      .where({ follower_id: String(followerId), following_id: String(userId) })
-      .del();
-
-    if (result === 0) {
-      return res.status(HTTP_STATUS.NOT_FOUND).json({ code: RESPONSE_CODES.NOT_FOUND, message: '关注记录不存在' });
-    }
-
-    // 更新关注者的关注数和被关注者的粉丝数
-    await db('users').where({ id: followerId }).decrement('follow_count', 1);
-    await db('users').where({ id: userId }).decrement('fans_count', 1);
+    // 删除关注记录 + 更新计数（使用事务保证一致性）
+    await db.transaction(async (trx) => {
+      await trx('follows')
+        .where({ follower_id: String(followerId), following_id: String(userId) })
+        .del();
+      await trx('users').where({ id: followerId }).decrement('follow_count', 1);
+      await trx('users').where({ id: userId }).decrement('fans_count', 1);
+    });
 
     // 删除相关的关注通知
     await db('notifications')

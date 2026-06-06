@@ -40,15 +40,6 @@ router.get('/', async (req, res) => {
   try {
     const { sortField = 'id', sortOrder = 'asc', name, category_title } = req.query;
 
-    // 生成缓存键（考虑查询参数）
-    const cacheKey = `${CACHE_KEY}:${sortField}:${sortOrder}:${name || ''}:${category_title || ''}`;
-
-    // 尝试从缓存获取
-    const cached = await getCache(cacheKey);
-    if (cached) {
-      return success(res, cached, '获取成功（缓存）');
-    }
-
     const db = getDB();
 
     const allowedSortFields = {
@@ -63,6 +54,15 @@ router.get('/', async (req, res) => {
     };
     const validSortField = allowedSortFields[sortField] || allowedSortFields['id'];
     const validSortOrder = allowedSortOrders[sortOrder?.toLowerCase()] || allowedSortOrders['asc'];
+
+    // 生成缓存键（使用验证后的排序参数，避免缓存污染）
+    const cacheKey = `${CACHE_KEY}:${sortField}:${sortOrder}:${name || ''}:${category_title || ''}`;
+
+    // 尝试从缓存获取
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return success(res, cached, '获取成功（缓存）');
+    }
 
     // 构建查询
     let query = db({ c: 'categories' })

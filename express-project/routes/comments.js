@@ -351,6 +351,19 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         comment_count: db.raw('GREATEST(comment_count - ?, 0)', [safeDeletedCount])
       });
 
+    // 删除与该评论相关的通知（评论通知和@通知）
+    try {
+      await db('notifications')
+        .where(function() {
+          this.where({ target_id: String(commentRecord.post_id), type: NotificationHelper.TYPES.COMMENT })
+            .orWhere({ target_id: String(commentId), type: NotificationHelper.TYPES.MENTION });
+        })
+        .where({ sender_id: String(userId) })
+        .del();
+    } catch (notifyError) {
+      console.error('删除评论通知失败:', notifyError.message);
+    }
+
     console.log('删除评论成功 - 用户ID: %s, 评论ID: %s', userId, commentId);
 
     res.json({

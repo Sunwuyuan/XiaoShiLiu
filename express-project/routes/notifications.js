@@ -316,6 +316,24 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// 标记所有通知为已读（必须在 /:id/read 之前注册，否则 "read-all" 会被当作 id 参数）
+router.put('/read-all', authenticateToken, async (req, res) => {
+  try {
+    const db = getDB();
+    const userId = req.user.id;
+
+    // 标记所有通知为已读
+    await db('notifications')
+      .where({ user_id: userId, is_read: 0 })
+      .update({ is_read: 1 });
+
+    res.json({ code: RESPONSE_CODES.SUCCESS, message: '全部标记成功' });
+  } catch (error) {
+    console.error('标记所有通知已读失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
+  }
+});
+
 // 标记通知为已读
 router.put('/:id/read', authenticateToken, async (req, res) => {
   try {
@@ -340,24 +358,6 @@ router.put('/:id/read', authenticateToken, async (req, res) => {
     res.json({ code: RESPONSE_CODES.SUCCESS, message: '标记成功' });
   } catch (error) {
     console.error('标记通知已读失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
-  }
-});
-
-// 标记所有通知为已读
-router.put('/read-all', authenticateToken, async (req, res) => {
-  try {
-    const db = getDB();
-    const userId = req.user.id;
-
-    // 标记所有通知为已读
-    await db('notifications')
-      .where({ user_id: userId, is_read: 0 })
-      .update({ is_read: 1 });
-
-    res.json({ code: RESPONSE_CODES.SUCCESS, message: '全部标记成功' });
-  } catch (error) {
-    console.error('标记所有通知已读失败:', error);
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
   }
 });
