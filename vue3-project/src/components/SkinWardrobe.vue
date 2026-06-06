@@ -98,7 +98,7 @@
                   @change="handleSkinUpload"
                 />
                 <label for="wardrobe-skin-file" class="file-label">
-                  {{ formData.skinFile ? formData.skinFile.name : '选择皮肤文件（PNG格式，最大500KB）' }}
+                  {{ formData.skinFile ? formData.skinFile.name : '选择皮肤文件（PNG格式，最大1024KB）' }}
                 </label>
                 <p v-if="formData.skinFile" class="file-selected">
                   已选择: {{ formData.skinFile.name }} ({{ (formData.skinFile.size / 1024).toFixed(1) }}KB)
@@ -231,8 +231,8 @@ function handleSkinUpload(event) {
     return
   }
 
-  if (file.size > 500 * 1024) {
-    messageManager.error('文件大小超过500KB限制')
+  if (file.size > 1024 * 1024) {
+    messageManager.error('文件大小超过1024KB限制')
     event.target.value = ''
     return
   }
@@ -250,8 +250,8 @@ function handleCapeUpload(event) {
     return
   }
 
-  if (file.size > 500 * 1024) {
-    messageManager.error('文件大小超过500KB限制')
+  if (file.size > 1024 * 1024) {
+    messageManager.error('文件大小超过1024KB限制')
     event.target.value = ''
     return
   }

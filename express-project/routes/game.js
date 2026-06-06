@@ -36,7 +36,7 @@ const { getDB } = require('../utils/db');
 const MAX_PROFILES_PER_USER = parseInt(process.env.MAX_PROFILES_PER_USER) || 1;
 const MAX_WARDROBE_ITEMS = parseInt(process.env.MAX_WARDROBE_ITEMS) || 10;
 const MAX_TEMP_PASSWORDS = parseInt(process.env.MAX_TEMP_PASSWORDS) || 5;
-const SKIN_MAX_SIZE = 500 * 1024;
+const SKIN_MAX_SIZE = 1024 * 1024;
 
 // 皮肤代理允许的图片URL域名白名单
 const SKIN_PROXY_WHITELIST = [
@@ -955,7 +955,7 @@ router.get('/config', async (req, res) => {
         yggdrasil_api_root: `${baseUrl}/api/yggdrasil`,
         server_name: '悦社社区',
         max_profiles_per_user: MAX_PROFILES_PER_USER,
-        skin_max_size: '500KB',
+        skin_max_size: '1024KB',
         supported_skin_models: ['classic', 'slim']
       },
       message: '获取成功'
