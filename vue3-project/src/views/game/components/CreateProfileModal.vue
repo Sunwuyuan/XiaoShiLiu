@@ -22,6 +22,7 @@ const password = ref('')
 const confirmPassword = ref('')
 const isSubmitting = ref(false)
 const showPassword = ref(false)
+const showConfirmPassword = ref(false)
 
 const canCreate = computed(() => props.currentCount < props.maxCount)
 
@@ -170,12 +171,21 @@ function handleClose() {
 
           <div class="form-group">
             <label>确认密码 *</label>
-            <input 
-              v-model="confirmPassword"
-              type="password"
-              placeholder="再次输入密码"
-              :disabled="isSubmitting"
-            />
+            <div class="password-input-wrapper">
+              <input 
+                v-model="confirmPassword"
+                :type="showConfirmPassword ? 'text' : 'password'"
+                placeholder="再次输入密码"
+                :disabled="isSubmitting"
+              />
+              <button 
+                type="button" 
+                class="toggle-password"
+                @click="showConfirmPassword = !showConfirmPassword"
+              >
+                <SvgIcon :name="showConfirmPassword ? 'eye-off' : 'eye'" />
+              </button>
+            </div>
             <p v-if="confirmPassword && password !== confirmPassword" class="error-text">
               密码不一致
             </p>
@@ -318,7 +328,7 @@ function handleClose() {
 .form-group input:focus {
   outline: none;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.1);
+  box-shadow: 0 0 0 3px var(--primary-color-shadow);
 }
 
 .form-group input:disabled {
@@ -328,6 +338,10 @@ function handleClose() {
 
 .password-input-wrapper {
   position: relative;
+}
+
+.password-input-wrapper input {
+  padding-right: 44px;
 }
 
 .toggle-password {
