@@ -138,6 +138,17 @@
                   已选择: {{ formData.capeFile.name }} ({{ (formData.capeFile.size / 1024).toFixed(1) }}KB)
                 </p>
               </div>
+              <!-- 编辑模式下，如果已有披风，显示删除选项 -->
+              <div v-if="editingItem && editingItem.cape_url && !formData.deleteCape" class="cape-actions">
+                <label class="delete-cape-checkbox">
+                  <input type="checkbox" v-model="formData.deleteCape" />
+                  <span>删除当前披风</span>
+                </label>
+              </div>
+              <div v-if="editingItem && formData.deleteCape" class="cape-deleted-hint">
+                披风将在保存后被删除
+                <button type="button" class="undo-btn" @click="formData.deleteCape = false">撤销</button>
+              </div>
             </div>
 
             <div class="form-actions">
@@ -186,7 +197,8 @@ const formData = reactive({
   name: '',
   model: 'classic',
   skinFile: null,
-  capeFile: null
+  capeFile: null,
+  deleteCape: false
 })
 
 // 计算属性
@@ -268,27 +280,29 @@ async function handleSubmit() {
     let res
 
     if (editingItem.value) {
-      const payload = {
-        name: formData.name,
-        model: formData.model
-      }
+      // 编辑模式：使用 PUT 接口直接更新
+      const formPayload = new FormData()
+      formPayload.append('name', formData.name)
+      formPayload.append('model', formData.model)
 
+      // 如果上传了新皮肤文件
       if (formData.skinFile) {
-        const formPayload = new FormData()
-        formPayload.append('name', formData.name)
-        formPayload.append('model', formData.model)
         formPayload.append('skin', formData.skinFile)
-
-        if (formData.capeFile) {
-          formPayload.append('cape', formData.capeFile)
-        }
-
-        res = await gameApi.addToWardrobe(props.profileId, formPayload)
-        await gameApi.deleteWardrobeItem(props.profileId, editingItem.value.id)
-      } else {
-        res = await gameApi.updateWardrobeItem(props.profileId, editingItem.value.id, payload)
       }
+
+      // 如果上传了新披风文件
+      if (formData.capeFile) {
+        formPayload.append('cape', formData.capeFile)
+      }
+
+      // 如果标记了删除披风
+      if (formData.deleteCape) {
+        formPayload.append('delete_cape', '1')
+      }
+
+      res = await gameApi.updateWardrobeItem(props.profileId, editingItem.value.id, formPayload)
     } else {
+      // 新增模式
       const formPayload = new FormData()
       formPayload.append('name', formData.name)
       formPayload.append('model', formData.model)
@@ -306,12 +320,21 @@ async function handleSubmit() {
       showDialog.value = false
       resetForm()
       await fetchWardrobe()
+
+      // 如果编辑的是当前使用的皮肤，通知父组件更新角色显示
+      if (editingItem.value && editingItem.value.is_active) {
+        emit('equipped', {
+          skin_url: res.data?.skin_url || editingItem.value.skin_url,
+          skin_model: res.data?.skin_model || formData.model,
+          cape_url: res.data?.cape_url !== undefined ? res.data.cape_url : editingItem.value.cape_url
+        })
+      }
     } else {
       messageManager.error(res.message || '操作失败')
     }
   } catch (error) {
     console.error('提交失败:', error)
-    messageManager.error('操作失败，请重试')
+    messageManager.error(error.response?.data?.message || '操作失败，请重试')
   } finally {
     isSubmitting.value = false
   }
@@ -323,6 +346,7 @@ function editItem(item) {
   formData.model = item.skin_model
   formData.skinFile = null
   formData.capeFile = null
+  formData.deleteCape = false
   showDialog.value = true
 }
 
@@ -384,6 +408,7 @@ function resetForm() {
   formData.model = 'classic'
   formData.skinFile = null
   formData.capeFile = null
+  formData.deleteCape = false
   editingItem.value = null
   const skinInput = document.getElementById('wardrobe-skin-file')
   const capeInput = document.getElementById('wardrobe-cape-file')
@@ -741,6 +766,51 @@ function formatTime(dateString) {
 .current-skin-hint {
   font-size: 12px;
   color: var(--text-color-tertiary);
+}
+
+/* 披风操作区域 */
+.cape-actions {
+  margin-top: 8px;
+}
+
+.delete-cape-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-color-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.delete-cape-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-color);
+}
+
+.cape-deleted-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.undo-btn {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.undo-btn:hover {
+  opacity: 0.8;
 }
 
 /* ====== 文件上传区域 ====== */

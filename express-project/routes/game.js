@@ -1280,8 +1280,11 @@ router.post('/profile/:id/wardrobe', authenticateToken, upload.fields([
   }
 });
 
-// 更新衣柜项
-router.put('/profile/:id/wardrobe/:itemId', authenticateToken, async (req, res) => {
+// 更新衣柜项（支持重新上传皮肤/披风文件）
+router.put('/profile/:id/wardrobe/:itemId', authenticateToken, upload.fields([
+  { name: 'skin', maxCount: 1 },
+  { name: 'cape', maxCount: 1 }
+]), async (req, res) => {
   try {
     const profileId = parseInt(req.params.id);
     const itemId = parseInt(req.params.itemId);
@@ -1311,6 +1314,7 @@ router.put('/profile/:id/wardrobe/:itemId', authenticateToken, async (req, res) 
     const updateData = {};
     let hasUpdate = false;
 
+    // 更新名称
     if (name && name.trim()) {
       const duplicateCheck = await db('mc_skin_wardrobe')
         .where({ profile_id: profileId, name: name.trim(), is_deleted: false })
@@ -1328,8 +1332,94 @@ router.put('/profile/:id/wardrobe/:itemId', authenticateToken, async (req, res) 
       hasUpdate = true;
     }
 
+    // 更新模型
     if (model && ['classic', 'slim'].includes(model)) {
       updateData.skin_model = model;
+      hasUpdate = true;
+    }
+
+    // 处理重新上传的皮肤文件
+    if (req.files?.skin && req.files.skin.length > 0) {
+      const skinFile = req.files.skin[0];
+
+      if (skinFile.mimetype !== 'image/png') {
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({
+          code: RESPONSE_CODES.VALIDATION_ERROR,
+          message: '只支持PNG格式的皮肤文件'
+        });
+      }
+
+      let processedSkinBuffer;
+      try {
+        processedSkinBuffer = await sharp(skinFile.buffer)
+          .png()
+          .toBuffer();
+      } catch (error) {
+        console.error('[Game] 皮肤处理失败:', error);
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({
+          code: RESPONSE_CODES.VALIDATION_ERROR,
+          message: '皮肤文件处理失败'
+        });
+      }
+
+      const skinHash = createFileHash(processedSkinBuffer);
+      const skinUploadResult = await uploadImage(processedSkinBuffer, skinHash, 'image/png');
+
+      if (!skinUploadResult.success) {
+        return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+          code: RESPONSE_CODES.ERROR,
+          message: skinUploadResult.message || '皮肤上传失败'
+        });
+      }
+
+      updateData.skin_url = skinUploadResult.url;
+      updateData.skin_hash = skinHash;
+      hasUpdate = true;
+    }
+
+    // 处理重新上传的披风文件
+    if (req.files?.cape && req.files.cape.length > 0) {
+      const capeFile = req.files.cape[0];
+
+      if (capeFile.mimetype !== 'image/png') {
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({
+          code: RESPONSE_CODES.VALIDATION_ERROR,
+          message: '只支持PNG格式的披风文件'
+        });
+      }
+
+      let processedCapeBuffer;
+      try {
+        processedCapeBuffer = await sharp(capeFile.buffer)
+          .png()
+          .toBuffer();
+      } catch (error) {
+        console.error('[Game] 披风处理失败:', error);
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({
+          code: RESPONSE_CODES.VALIDATION_ERROR,
+          message: '披风文件处理失败'
+        });
+      }
+
+      const capeHash = createFileHash(processedCapeBuffer);
+      const capeUploadResult = await uploadImage(processedCapeBuffer, capeHash, 'image/png');
+
+      if (!capeUploadResult.success) {
+        return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+          code: RESPONSE_CODES.ERROR,
+          message: capeUploadResult.message || '披风上传失败'
+        });
+      }
+
+      updateData.cape_url = capeUploadResult.url;
+      updateData.cape_hash = capeHash;
+      hasUpdate = true;
+    }
+
+    // 处理删除披风（前端传 delete_cape=1 表示删除）
+    if (req.body.delete_cape === '1' || req.body.delete_cape === 'true') {
+      updateData.cape_url = null;
+      updateData.cape_hash = null;
       hasUpdate = true;
     }
 
@@ -1340,25 +1430,47 @@ router.put('/profile/:id/wardrobe/:itemId', authenticateToken, async (req, res) 
       });
     }
 
+    updateData.updated_at = new Date();
+
     await db('mc_skin_wardrobe')
       .where({ id: itemId })
       .update(updateData);
 
-    // 如果是当前使用的皮肤且修改了模型，同步更新角色表
-    if (wardrobeItem.is_active && updateData.skin_model) {
-      await db('mc_profiles')
-        .where({ id: profileId })
-        .update({ skin_model: updateData.skin_model });
+    // 如果是当前使用的皮肤，同步更新角色表
+    if (wardrobeItem.is_active) {
+      const profileUpdateData = {};
+      if (updateData.skin_url !== undefined) profileUpdateData.skin_url = updateData.skin_url;
+      if (updateData.skin_model !== undefined) profileUpdateData.skin_model = updateData.skin_model;
+      if (updateData.cape_url !== undefined) profileUpdateData.cape_url = updateData.cape_url;
+
+      if (Object.keys(profileUpdateData).length > 0) {
+        profileUpdateData.updated_at = new Date();
+        await db('mc_profiles')
+          .where({ id: profileId })
+          .update(profileUpdateData);
+      }
     }
 
     await auditLog('WARDROBE_UPDATE', req.user.id, profileId, req.ip, {
       item_id: itemId,
-      changes: updateData
+      changes: Object.keys(updateData)
     });
+
+    // 查询更新后的数据返回
+    const updatedItem = await db('mc_skin_wardrobe')
+      .where({ id: itemId })
+      .first();
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
-      data: { id: itemId, ...updateData },
+      data: {
+        id: itemId,
+        name: updatedItem.name,
+        skin_url: updatedItem.skin_url,
+        skin_model: updatedItem.skin_model,
+        cape_url: updatedItem.cape_url,
+        is_active: updatedItem.is_active
+      },
       message: '更新成功'
     });
 

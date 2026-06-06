@@ -131,12 +131,18 @@ export const gameApi = {
     })
   },
 
-  // 更新衣柜项（改名、换模型）
+  // 更新衣柜项（支持改名、换模型、重新上传皮肤/披风文件）
   updateWardrobeItem(profileId, itemId, data) {
+    // 如果 data 是 FormData（包含文件上传），使用 multipart/form-data
+    const isFormData = data instanceof FormData
     return request({
       url: `/game/profile/${profileId}/wardrobe/${itemId}`,
       method: 'put',
-      data
+      data,
+      headers: isFormData ? {
+        'Content-Type': 'multipart/form-data'
+      } : undefined,
+      timeout: isFormData ? 60000 : 10000
     })
   },
 
