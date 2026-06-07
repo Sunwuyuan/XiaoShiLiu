@@ -1815,7 +1815,7 @@ router.post('/profile/:id/temp-password', authenticateToken, async (req, res) =>
         profile_id: profileId,
         user_id: req.user.id,
         temp_password_hash: passwordHash,
-        // 不再存储明文密码，仅返回一次给用户
+        temp_password_plain: plainPassword,
         max_uses: uses,
         used_count: 0,
         expires_at: expiresDate,

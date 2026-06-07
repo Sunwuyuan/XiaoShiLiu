@@ -61,6 +61,23 @@ const app = express();
 // 信任代理配置（在所有路由之前设置，解决 express-rate-limit 的 X-Forwarded-For 警告）
 app.set('trust proxy', 1);
 
+// 清洗 req.ip：移除可能携带的端口号，防止 express-rate-limit 新版严格校验报错
+// 场景：反向代理（如 Nginx）转发时 X-Forwarded-For 可能携带 IP:端口 格式
+app.use((req, res, next) => {
+  if (req.ip && req.ip.includes(':') && !req.ip.startsWith('[')) {
+    // IPv4:端口 格式（如 120.219.197.38:33372），取最后一个冒号前的部分
+    const lastColonIndex = req.ip.lastIndexOf(':');
+    if (lastColonIndex > 0) {
+      const possibleIp = req.ip.substring(0, lastColonIndex);
+      // 验证是否为合法 IPv4
+      if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(possibleIp)) {
+        req.ip = possibleIp;
+      }
+    }
+  }
+  next();
+});
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
