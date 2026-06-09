@@ -2425,7 +2425,7 @@ const filteredApiGroups = computed(() => {
 }
 
 .docs-header {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-color-shadow) 100%);
+  background: var(--primary-color);
   color: white;
   padding: 30px;
   margin-bottom: 30px;

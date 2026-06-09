@@ -14,6 +14,7 @@ import DraftBoxPage from '@/views/draft-box/index.vue'
 import NotFound from '@/views/NotFound.vue'
 import LogtoCallback from '@/views/LogtoCallback.vue'
 import { getValidChannelPaths } from '@/config/channels'
+import Home from '@/views/Home.vue'
 
 // 后台管理系统组件
 import AdminLogin from '@/views/admin/AdminLogin.vue'
@@ -53,8 +54,12 @@ const router = createRouter({
     },
     {
       path: '/',
+      name: 'home',
+      component: Home
+    },
+    {
+      path: '/',
       component: layout,
-      redirect: '/explore',
       children: [
         {
           path: '/explore',

@@ -95,9 +95,9 @@ const restoreThemeColor = () => {
   else{
   // 设置默认主题色
     const root = document.documentElement
-    root.style.setProperty('--primary-color', '#ff2442')
-    root.style.setProperty('--primary-color-dark', '#b31f35')
-    root.style.setProperty('--primary-color-shadow', 'rgba(254, 40, 67, 0.3)')
+    root.style.setProperty('--primary-color', '#1d9bf0')
+    root.style.setProperty('--primary-color-dark', '#1a8cd8')
+    root.style.setProperty('--primary-color-shadow', 'rgba(29, 155, 240, 0.3)')
   }
 }
 

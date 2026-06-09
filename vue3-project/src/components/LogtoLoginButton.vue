@@ -70,7 +70,7 @@ const handleLogin = async () => {
   font-size: 16px;
   font-weight: 600;
   color: white;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #1d9bf0;
   border: none;
   border-radius: 12px;
   cursor: pointer;
@@ -79,7 +79,7 @@ const handleLogin = async () => {
 
 .logto-login-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8px 20px rgba(29, 155, 240, 0.3);
 }
 
 .logto-login-btn:disabled {

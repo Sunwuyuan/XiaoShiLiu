@@ -290,13 +290,13 @@ function parseUserAgent(ua) {
 }
 
 .btn-danger-outline {
-  background: rgba(255, 12, 48, 0.08);
+  background: rgba(244, 33, 46, 0.08);
   color: var(--danger-color);
-  border: 1px solid rgba(255, 12, 48, 0.2);
+  border: 1px solid rgba(244, 33, 46, 0.2);
 }
 
 .btn-danger-outline:hover {
-  background: rgba(255, 12, 48, 0.15);
+  background: rgba(244, 33, 46, 0.15);
 }
 
 /* 加载和空状态 */
@@ -404,7 +404,7 @@ function parseUserAgent(ua) {
 }
 
 .status-badge.invalidated {
-  background: rgba(255, 12, 48, 0.1);
+  background: rgba(244, 33, 46, 0.1);
   color: var(--danger-color);
 }
 
@@ -452,7 +452,7 @@ function parseUserAgent(ua) {
 }
 
 .kick-btn:hover {
-  background: rgba(255, 12, 48, 0.1);
+  background: rgba(244, 33, 46, 0.1);
   color: var(--danger-color);
 }
 

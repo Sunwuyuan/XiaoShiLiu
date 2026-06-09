@@ -1,23 +1,23 @@
 :root {
-  /* 主题色 */
-  --primary-color: #ff2442;
-  --primary-color-dark: #b31f35;
-  --primary-color-shadow: rgba(254, 40, 67, 0.3);
+  /* 主题色 - x.com 蓝色 */
+  --primary-color: #1d9bf0;
+  --primary-color-dark: #1a8cd8;
+  --primary-color-shadow: rgba(29, 155, 240, 0.3);
   /* 文本颜色 */
-  --text-color-primary: #333;
-  --text-color-secondary: #5c5c5c;
-  --text-color-tertiary: #858585;
-  --text-color-quaternary: #bbbbbb;
+  --text-color-primary: #0f1419;
+  --text-color-secondary: #536471;
+  --text-color-tertiary: #8899a6;
+  --text-color-quaternary: #b9cad3;
   --text-color-inverse: #fff;
-  --text-color-tag: #13386c;
+  --text-color-tag: #1d9bf0;
   /* 背景颜色 */
   --bg-color-primary: #fff;
-  --bg-color-secondary: #f7f7f7;
-  --bg-color-tertiary: #e8e4e4;
-  --bg-color-inverse: #474747;
+  --bg-color-secondary: #f7f9f9;
+  --bg-color-tertiary: #eff3f4;
+  --bg-color-inverse: #0f1419;
   /* 边框颜色 */
-  --border-color-primary: #ebebeb;
-  --border-color-secondary: #eee;
+  --border-color-primary: #eff3f4;
+  --border-color-secondary: #e6e9ea;
 
   /* 禁用状态颜色 */
   --disabled-bg: #ccc;
@@ -28,55 +28,55 @@
   --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
 
   /* 通用遮罩背景（半透明） */
-  --overlay-bg: rgba(18, 18, 18, 0.5);
+  --overlay-bg: rgba(0, 0, 0, 0.4);
 
   /* 按钮文字颜色 */
   --button-text-color: #fff;
 
   /* 危险颜色 */
-  --danger-color: #ff0c30;
-  --danger-color-dark: rgb(201, 9, 37);
+  --danger-color: #f4212e;
+  --danger-color-dark: #dc1e29;
 }
 
-/* 深色主题 */
+/* 深色主题 - x.com 深色模式 */
 [data-theme="dark"] {
-  /* 主题色 */
-  --primary-color: #ff2442;
-  --primary-color-dark: #b31f35;
-  --primary-color-shadow: rgba(254, 40, 67, 0.3);
+  /* 主题色 - x.com 蓝色 */
+  --primary-color: #1d9bf0;
+  --primary-color-dark: #1a8cd8;
+  --primary-color-shadow: rgba(29, 155, 240, 0.3);
 
   /* 文本颜色 */
-  --text-color-primary: #e0e0e0;
-  --text-color-secondary: #b0b0b0;
-  --text-color-tertiary: #909090;
-  --text-color-quaternary: #707070;
-  --text-color-inverse: #0a0a0a;
-  --text-color-tag: #c7daef;
+  --text-color-primary: #e7e9ea;
+  --text-color-secondary: #71767b;
+  --text-color-tertiary: #56595d;
+  --text-color-quaternary: #3d4043;
+  --text-color-inverse: #0f1419;
+  --text-color-tag: #1d9bf0;
 
   /* 背景颜色 */
-  --bg-color-primary: #121212;
-  --bg-color-secondary: #1e1e1e;
-  --bg-color-tertiary: #2a2a2a;
-  --bg-color-inverse: #e7e7e7;
+  --bg-color-primary: #000;
+  --bg-color-secondary: #16181c;
+  --bg-color-tertiary: #202327;
+  --bg-color-inverse: #e7e9ea;
 
   /* 边框颜色 */
-  --border-color-primary: #242424;
-  --border-color-secondary: #252525;
+  --border-color-primary: #2f3336;
+  --border-color-secondary: #333639;
 
   /* 禁用状态颜色 */
-  --disabled-bg: #ccc;
+  --disabled-bg: #3d4043;
   --disabled-text: #ffffff;
 
   /* 阴影颜色 */
-  --shadow-color: rgba(0, 0, 0, 0.3);
+  --shadow-color: rgba(255, 255, 255, 0.05);
 
   /* 通用遮罩背景（半透明） */
-  --overlay-bg: rgba(27, 27, 27, 0.6);
+  --overlay-bg: rgba(91, 112, 131, 0.4);
 
   /* 按钮文字颜色 */
   --button-text-color: #fff;
 
   /* 危险颜色 */
-  --danger-color: #ff0c30;
-  --danger-color-dark: rgb(201, 9, 37);
+  --danger-color: #f4212e;
+  --danger-color-dark: #dc1e29;
 }

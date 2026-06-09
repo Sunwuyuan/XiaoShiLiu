@@ -163,7 +163,7 @@ onMounted(() => {
 }
 
 .error-icon {
-  color: #ff4757;
+  color: #f4212e;
 }
 
 .success-icon {

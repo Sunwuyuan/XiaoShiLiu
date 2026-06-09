@@ -775,7 +775,7 @@ function formatTime(dateString) {
 .form-group input[type="text"]:focus {
   outline: none;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(254, 40, 67, 0.1);
+  box-shadow: 0 0 0 3px rgba(29, 155, 240, 0.1);
 }
 
 .current-skin-hint {

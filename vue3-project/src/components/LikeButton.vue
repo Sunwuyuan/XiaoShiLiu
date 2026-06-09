@@ -127,7 +127,7 @@ const onRingEnd = () => {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid #ff4757;
+  border: 1px solid #1d9bf0;
   background: transparent;
   transform: translate(-50%, -50%) scale(0);
   animation: likeRing 0.6s ease-out;

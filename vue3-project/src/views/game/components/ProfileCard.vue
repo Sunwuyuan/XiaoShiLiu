@@ -394,7 +394,7 @@ function copyToClipboard(text) {
 }
 
 .wardrobe-btn:hover:not(:disabled) {
-  color: #667eea;
+  color: #1d9bf0;
 }
 
 .delete-btn:hover:not(:disabled) {

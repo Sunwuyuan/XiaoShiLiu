@@ -729,7 +729,7 @@ function formatDateTime(dateString) {
 
 .meta-tag.expires.urgent {
   color: var(--danger-color);
-  background: rgba(255, 12, 48, 0.1);
+  background: rgba(244, 33, 46, 0.1);
 }
 
 .meta-tag.last-used {
@@ -755,7 +755,7 @@ function formatDateTime(dateString) {
 }
 
 .action-btn:hover {
-  background: rgba(255, 12, 48, 0.1);
+  background: rgba(244, 33, 46, 0.1);
   color: var(--danger-color);
 }
 
