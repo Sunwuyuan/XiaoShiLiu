@@ -9,10 +9,22 @@
 
 import { fileURLToPath, URL } from 'node:url'
 import path from 'path'
+import { execSync } from 'child_process'
 
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons'
+
+// 获取 git commit sha（short）
+function getGitSha() {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
+const gitSha = getGitSha()
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -24,6 +36,10 @@ export default defineConfig({
       symbolId: 'icon-[name]',
     }),
   ],
+  define: {
+    // 注入 git sha 到全局
+    __GIT_SHA__: JSON.stringify(gitSha),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

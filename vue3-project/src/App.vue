@@ -2,6 +2,7 @@
 import { RouterView } from 'vue-router'
 import { onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { startVersionPolling } from '@/utils/versionCheck.js'
 import { useAuthStore } from '@/stores/auth'
 import { useAboutStore } from '@/stores/about'
 import { useChangePasswordStore } from '@/stores/changePassword'
@@ -105,6 +106,8 @@ const restoreThemeColor = () => {
 onMounted(() => {
   userStore.initUserInfo()
   restoreThemeColor()
+  // 启动版本检测（5分钟轮询 + 页面可见时检测）
+  startVersionPolling(5 * 60 * 1000)
 })
 </script>
 
