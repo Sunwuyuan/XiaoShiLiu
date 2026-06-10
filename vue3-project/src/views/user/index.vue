@@ -14,10 +14,15 @@ import { userApi } from '@/api/index.js'
 import BackToTopButton from '@/components/BackToTopButton.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import VerifiedBadge from '@/components/VerifiedBadge.vue'
+import EconomyStatusBar from '@/components/economy/EconomyStatusBar.vue'
+import UserName from '@/components/user/UserName.vue'
+import UserAvatar from '@/components/user/UserAvatar.vue'
+import { useEconomyStore } from '@/stores/economy.js'
 
 const router = useRouter()
 const navigationStore = useNavigationStore()
 const userStore = useUserStore()
+const economyStore = useEconomyStore()
 
 const defaultAvatar = new URL('@/assets/imgs/avatar.png', import.meta.url).href
 
@@ -114,6 +119,10 @@ const loadUserStats = async () => {
 // 页面挂载时自动滚动到顶部并获取统计信息
 onMounted(() => {
   navigationStore.scrollToTop('instant')
+
+  // 获取经济装备数据
+  economyStore.fetchEquipped()
+  economyStore.fetchLevel()
 
   // 监听全局点赞和收藏事件
   eventBus.on(EVENT_TYPES.USER_LIKED_POST, handleGlobalLikeEvent)
@@ -312,11 +321,25 @@ function handleCollect(data) {
   <div class="content-container">
     <div class="user-info" v-if="userStore.isLoggedIn">
       <div class="basic-info">
-        <img :src="userStore.userInfo?.avatar || defaultAvatar" :alt="userStore.userInfo?.nickname || '用户头像'"
-          class="avatar" @click="previewAvatar" @error="handleAvatarError">
+        <UserAvatar
+          :avatar="userStore.userInfo?.avatar || defaultAvatar"
+          :nickname="userStore.userInfo?.nickname || ''"
+          :frameConfig="economyStore.equipped?.frame_config"
+          :accessoryConfig="economyStore.equipped?.accessory_config"
+          :level="economyStore.currentLevel"
+          size="xl"
+          showLevel
+          @click="previewAvatar"
+          style="cursor: pointer"
+        />
         <div class="user-basic">
           <div class="user-nickname">
-            <span>{{ userStore.userInfo?.nickname || '用户' }}</span>
+            <UserName
+              :nickname="userStore.userInfo?.nickname || '用户'"
+              :styleConfig="economyStore.equipped?.name_style_config"
+              :level="economyStore.currentLevel"
+              showLevel
+            />
             <VerifiedBadge v-if="userStore.userInfo?.verified" :verified="userStore.userInfo.verified" size="large"/>
           </div>
           <div class="user-content">
@@ -350,8 +373,8 @@ function handleCollect(data) {
           <span class="shows">获赞与收藏</span>
         </div>
       </div>
+      <EconomyStatusBar />
     </div>
-
 
     <div class="login-prompt" v-else>
       <div class="prompt-content">

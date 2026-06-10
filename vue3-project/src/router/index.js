@@ -38,6 +38,12 @@ import AuditManagement from '@/views/admin/AuditManagement.vue'
 import PostAudit from '@/views/admin/PostAudit.vue'
 import game from '@/views/game/index.vue'
 
+// 经济系统页面
+const EconomyShop = () => import('@/views/economy/Shop.vue')
+const EconomyInventory = () => import('@/views/economy/Inventory.vue')
+const EconomyTasks = () => import('@/views/economy/Tasks.vue')
+const EconomyAchievements = () => import('@/views/economy/Achievements.vue')
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -179,6 +185,27 @@ const router = createRouter({
           path: 'draft-box',
           name: 'draft_box',
           component: DraftBoxPage
+        },
+        // 经济系统路由
+        {
+          path: '/economy/shop',
+          name: 'economy_shop',
+          component: EconomyShop
+        },
+        {
+          path: '/economy/inventory',
+          name: 'economy_inventory',
+          component: EconomyInventory
+        },
+        {
+          path: '/economy/tasks',
+          name: 'economy_tasks',
+          component: EconomyTasks
+        },
+        {
+          path: '/economy/achievements',
+          name: 'economy_achievements',
+          component: EconomyAchievements
         },
         // 404页面 - 捕获所有未匹配的路由
         {
