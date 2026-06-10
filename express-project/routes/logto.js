@@ -98,6 +98,7 @@ async function getLogtoUserInfo(accessToken) {
     name: response.data.name,
     nickname: response.data.nickname,
     username: response.data.username,
+    preferred_username: response.data.preferred_username,
     email: response.data.email,
     picture: response.data.picture ? '有头像' : '无头像'
   });
@@ -110,12 +111,14 @@ async function findOrCreateUser(logtoUser, req) {
   const logtoColumnExists = await checkLogtoColumnExists();
   const logtoId = logtoUser.sub;
   const nickname = logtoUser.name || logtoUser.nickname || logtoUser.username || 'Logto 用户';
+  const username = logtoUser.username || logtoUser.preferred_username || '';
   const avatar = logtoUser.picture || '';
   const email = logtoUser.email || '';
-  
+
   console.log('处理用户数据:', {
     logtoId,
     nickname,
+    username,
     hasAvatar: !!avatar,
     email
   });
@@ -137,8 +140,13 @@ async function findOrCreateUser(logtoUser, req) {
     if (users.length > 0) {
       user = users[0];
       console.log('找到已存在的 Logto 用户，更新登录时间');
-      
-      await db('users').where({ id: user.id }).update({ last_login_at: db.fn.now() });
+
+      // 更新 username 和 email（如果 Logto 返回了新的值）
+      const updates = { last_login_at: db.fn.now() };
+      if (username && user.username !== username) updates.username = username;
+      if (email && !user.email) updates.email = email;
+
+      await db('users').where({ id: user.id }).update(updates);
       return user;
     }
     
@@ -156,6 +164,7 @@ async function findOrCreateUser(logtoUser, req) {
     const newUsers = await db('users').insert({
       logto_id: logtoId,
       user_id: userId.slice(0, 15),
+      username: username,
       nickname: nickname,
       avatar: avatar,
       bio: '',
@@ -190,6 +199,7 @@ async function findOrCreateUser(logtoUser, req) {
     // 使用 returning('*') 获取插入的完整行（PostgreSQL 兼容）
     const newUsers = await db('users').insert({
       user_id: userId.slice(0, 15),
+      username: username,
       nickname: nickname,
       avatar: avatar,
       bio: '',

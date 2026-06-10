@@ -42,7 +42,7 @@
               class="mention-user-display"
             />
             <div class="friend-info">
-              <div class="friend-id">@{{ user.user_id }}</div>
+              <div class="friend-id">@{{ user.username || user.user_id }}</div>
             </div>
           </div>
         </div>

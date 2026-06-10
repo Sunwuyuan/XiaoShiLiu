@@ -679,7 +679,7 @@ const selectMentionUser = (user) => {
   isUserTyping.value = true
 
   const targetUserId = user.user_id || user.id
-  const targetNickname = user.nickname || user.username
+  const targetNickname = user.username || user.nickname
 
   // 优先查找最近的@符号span进行替换
   let atMarker = null

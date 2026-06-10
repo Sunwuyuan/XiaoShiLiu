@@ -120,11 +120,15 @@ router.get('/search', optionalAuth, async (req, res) => {
 
     const db = getDB();
 
-    // 搜索用户：支持昵称和悦社号搜索
+    // 搜索用户：支持昵称、username 和悦社号搜索
     const rows = await db('users')
-      .where(function() { this.where('nickname', 'like', `%${keyword}%`).orWhere('user_id', 'like', `%${keyword}%`); })
+      .where(function() {
+        this.where('nickname', 'like', `%${keyword}%`)
+          .orWhere('user_id', 'like', `%${keyword}%`)
+          .orWhere('username', 'like', `%${keyword}%`);
+      })
       .select(
-        'id', 'user_id', 'nickname', 'avatar', 'bio', 'location',
+        'id', 'user_id', 'username', 'nickname', 'avatar', 'bio', 'location',
         'follow_count', 'fans_count', 'like_count', 'created_at', 'verified'
       )
       .orderBy('created_at', 'desc')
@@ -254,7 +258,7 @@ router.get('/:id', async (req, res) => {
       })
       .where('u.user_id', userIdParam)
       .select(
-        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.id', 'u.user_id', 'u.username', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
         'u.gender', 'u.zodiac_sign', 'u.mbti', 'u.education',
         'u.major', 'u.interests', 'u.follow_count', 'u.fans_count',
         'u.like_count', 'u.created_at', 'u.verified', 'uv.title as verified_title'
@@ -698,7 +702,7 @@ router.get('/:id/following', optionalAuth, async (req, res) => {
       .leftJoin({ u: 'users' }, 'f.following_id', 'u.id')
       .where('f.follower_id', String(userId))
       .select(
-        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.id', 'u.user_id', 'u.username', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
         'u.follow_count', 'u.fans_count', 'u.like_count', 'u.created_at', 'u.verified',
         'f.created_at as followed_at'
       )
@@ -789,7 +793,7 @@ router.get('/:id/followers', optionalAuth, async (req, res) => {
       .leftJoin({ u: 'users' }, 'f.follower_id', 'u.id')
       .where('f.following_id', String(userId))
       .select(
-        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.id', 'u.user_id', 'u.username', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
         'u.follow_count', 'u.fans_count', 'u.like_count', 'u.created_at', 'u.verified',
         'f.created_at as followed_at'
       )
@@ -889,7 +893,7 @@ router.get('/:id/mutual-follows', optionalAuth, async (req, res) => {
           });
       })
       .select(
-        'u.id', 'u.user_id', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
+        'u.id', 'u.user_id', 'u.username', 'u.nickname', 'u.avatar', 'u.bio', 'u.location',
         'u.follow_count', 'u.fans_count', 'u.like_count', 'u.created_at', 'u.verified'
       )
       .orderBy('u.created_at', 'desc')
