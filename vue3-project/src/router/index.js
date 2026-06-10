@@ -15,6 +15,7 @@ import NotFound from '@/views/NotFound.vue'
 import LogtoCallback from '@/views/LogtoCallback.vue'
 import { getValidChannelPaths } from '@/config/channels'
 import Home from '@/views/Home.vue'
+import { useUserStore } from '@/stores/user.js'
 
 // 后台管理系统组件
 import AdminLogin from '@/views/admin/AdminLogin.vue'
@@ -53,7 +54,7 @@ const router = createRouter({
       component: () => import('@/views/admin/AdminLogin.vue')
     },
     {
-      path: '/',
+      path: '/home',
       name: 'home',
       component: Home
     },
@@ -289,6 +290,20 @@ const router = createRouter({
       ]
     }
   ],
+})
+
+// 全局前置守卫 - 根路径跳转逻辑
+router.beforeEach((to, from, next) => {
+  if (to.path === '/') {
+    const userStore = useUserStore()
+    if (userStore.isLoggedIn) {
+      next('/explore')
+    } else {
+      next('/home')
+    }
+  } else {
+    next()
+  }
 })
 
 export default router

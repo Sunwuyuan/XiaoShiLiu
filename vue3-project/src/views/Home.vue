@@ -20,7 +20,7 @@
           <a href="https://developer.dy.ci" class="nav-link" target="_blank">开发者</a>
         </div>
         <div class="nav-actions">
-          <a href="/explore" class="btn-primary">进入悦社</a>
+          <a href="../explore" class="btn-primary" target="_blank">登录</a>
         </div>
       </div>
     </nav>
@@ -47,7 +47,7 @@
           连接每一个创造者与开发者。
         </p>
         <div class="hero-actions" :class="{ 'animate-in': visible }">
-          <a href="https://dy.ci/explore" class="btn-ghost btn-lg" target="_blank">
+          <a href="/explore" class="btn-ghost btn-lg">
             <span>进入悦社</span>
           </a>
           <a href="#projects" class="btn-primary btn-lg">
@@ -55,9 +55,6 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
-          </a>
-          <a href="https://developer.dy.ci" class="btn-ghost btn-lg" target="_blank">
-            <span>开发者平台</span>
           </a>
         </div>
       </div>
@@ -178,7 +175,7 @@
         <a href="https://auth.yun" class="btn-primary btn-lg" target="_blank" rel="noopener">
           <span>统一登录</span>
         </a>
-        <a href="https://dy.ci" class="btn-ghost btn-lg" target="_blank" rel="noopener">
+        <a href="/explore" class="btn-ghost btn-lg">
           <span>进入悦社</span>
         </a>
       </div>
