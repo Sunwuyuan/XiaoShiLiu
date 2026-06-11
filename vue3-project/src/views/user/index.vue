@@ -327,6 +327,7 @@ function handleCollect(data) {
           :frameConfig="economyStore.equipped?.frame_config"
           :accessoryConfig="economyStore.equipped?.accessory_config"
           :level="economyStore.currentLevel"
+          :levelTitle="economyStore.currentLevelTitle"
           size="xl"
           showLevel
           @click="previewAvatar"
@@ -338,6 +339,7 @@ function handleCollect(data) {
               :nickname="userStore.userInfo?.nickname || '用户'"
               :styleConfig="economyStore.equipped?.name_style_config"
               :level="economyStore.currentLevel"
+              :levelTitle="economyStore.currentLevelTitle"
               showLevel
             />
             <VerifiedBadge v-if="userStore.userInfo?.verified" :verified="userStore.userInfo.verified" size="large"/>

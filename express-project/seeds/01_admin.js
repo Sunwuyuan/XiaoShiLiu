@@ -10,7 +10,7 @@ exports.seed = async function(knex) {
 
   const adminData = {
     username: 'admin',
-    is_super: true,
+    is_super: 1,
     nickname: '超级管理员'
   };
 

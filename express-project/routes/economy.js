@@ -1,6 +1,6 @@
 /**
  * 悦社社区 - 经济系统 API 路由
- * 提供货币、等级、背包、商店、任务、成就等经济系统接口
+ * 提供货币、等级、背包、商店、任务等经济系统接口
  *
  * @author zhaishis
  * @version v1.0.0
@@ -8,33 +8,22 @@
 
 const express = require('express');
 const router = express.Router();
-const { HTTP_STATUS, RESPONSE_CODES } = require('../constants');
-const { authenticateToken } = require('../middleware/auth');
-const { getDB } = require('../utils/db');
-
-// ========== 等级配置 ==========
-const LEVEL_CONFIG = [
-  { level: 1, title: 'Esc', exp: 0 },
-  { level: 2, title: 'F1', exp: 50 },
-  { level: 3, title: 'F2', exp: 150 },
-  { level: 4, title: 'Tab', exp: 300 },
-  { level: 5, title: 'Tab', exp: 500 },
-  { level: 6, title: 'Tab', exp: 800 },
-  { level: 7, title: 'Shift', exp: 1500 },
-  { level: 8, title: 'Shift', exp: 2200 },
-  { level: 9, title: 'Shift', exp: 3000 },
-  { level: 10, title: 'Shift', exp: 4000 },
-  { level: 11, title: 'Ctrl', exp: 7000 },
-  { level: 12, title: 'Ctrl', exp: 9000 },
-  { level: 13, title: 'Ctrl', exp: 12000 },
-  { level: 14, title: 'Ctrl', exp: 15000 },
-  { level: 15, title: 'Ctrl', exp: 20000 },
-  { level: 16, title: 'Alt', exp: 35000 },
-  { level: 17, title: 'Alt', exp: 45000 },
-  { level: 18, title: 'Alt', exp: 60000 },
-  { level: 19, title: 'Alt', exp: 80000 },
-  { level: 20, title: 'Space', exp: 150000 },
-];
+const {
+  HTTP_STATUS,
+  RESPONSE_CODES,
+  authenticateToken,
+  getUserId,
+  getDB,
+  ensureEconomyRecord,
+  ensureLevelRecord,
+  addCurrency,
+  addExp,
+  calcLevel,
+  ACHIEVEMENT_DEFINITIONS,
+  ACHIEVEMENT_REWARDS,
+  calcLoginStreak,
+  checkAndUnlockAchievements,
+} = require('./economyShared');
 
 // ========== 任务奖励配置 ==========
 const TASK_REWARDS = {
@@ -46,7 +35,7 @@ const TASK_REWARDS = {
 // ========== 任务定义 ==========
 const TASK_DEFINITIONS = {
   // 每日任务
-  daily_login:    { name: '每日登录',     description: '每天登录悦社',           task_type: 'daily',  target: 1 },
+  daily_login:    { name: '每日登录',     description: '每天登录悦社（签到）',       task_type: 'daily',  target: 1 },
   daily_like:     { name: '每日点赞',     description: '每天点赞 3 篇内容',       task_type: 'daily',  target: 3 },
   daily_comment:  { name: '每日评论',     description: '每天发表 1 条评论',       task_type: 'daily',  target: 1 },
   daily_share:    { name: '每日分享',     description: '每天分享 1 篇内容',       task_type: 'daily',  target: 1 },
@@ -68,96 +57,6 @@ const TASK_DEFINITIONS = {
   main_level10:      { name: '进阶之路',   description: '达到等级 10',             task_type: 'main', target: 1 },
 };
 
-// ========== 成就奖励配置 ==========
-// achievement_id -> { pi, alpha, exp }
-const ACHIEVEMENT_REWARDS = {
-  first_post: { pi: 20, alpha: 0, exp: 50 },
-  first_comment: { pi: 10, alpha: 0, exp: 30 },
-  level_5: { pi: 100, alpha: 5, exp: 0 },
-  level_10: { pi: 500, alpha: 20, exp: 0 },
-  level_20: { pi: 2000, alpha: 100, exp: 0 },
-  collector_10: { pi: 50, alpha: 0, exp: 100 },
-  collector_50: { pi: 200, alpha: 10, exp: 300 },
-  shop_first_buy: { pi: 0, alpha: 0, exp: 50 },
-};
-
-// ========== 成就定义 ==========
-const ACHIEVEMENT_DEFINITIONS = {
-  first_post:     { name: '初出茅庐',     description: '发布你的第一篇笔记',       icon: 'post' },
-  first_comment:  { name: '开口说话',     description: '发表你的第一条评论',       icon: 'comment' },
-  level_5:        { name: '崭露头角',     description: '达到等级 5',              icon: 'level' },
-  level_10:       { name: '小有成就',     description: '达到等级 10',             icon: 'level' },
-  level_20:       { name: '登峰造极',     description: '达到等级 20',             icon: 'level' },
-  collector_10:   { name: '初级收藏家',   description: '背包中拥有 10 件道具',     icon: 'bag' },
-  collector_50:   { name: '资深收藏家',   description: '背包中拥有 50 件道具',     icon: 'bag' },
-  shop_first_buy: { name: '初次购物',     description: '在商店购买第一件道具',     icon: 'shop' },
-  like_50:        { name: '人气萌芽',     description: '累计获得 50 个点赞',       icon: 'like' },
-  like_500:       { name: '人气爆棚',     description: '累计获得 500 个点赞',      icon: 'like' },
-  fans_10:        { name: '初具魅力',     description: '累计获得 10 个粉丝',       icon: 'fans' },
-  fans_100:       { name: '魅力无限',     description: '累计获得 100 个粉丝',      icon: 'fans' },
-  post_10:        { name: '勤奋作者',     description: '累计发布 10 篇笔记',      icon: 'post' },
-  post_100:       { name: '高产作家',     description: '累计发布 100 篇笔记',     icon: 'post' },
-  comment_50:     { name: '评论达人',     description: '累计发表 50 条评论',       icon: 'comment' },
-  login_30:       { name: '坚持打卡',     description: '连续登录 30 天',          icon: 'calendar' },
-};
-
-// ========== 辅助函数 ==========
-
-/**
- * 获取用户ID（悦社号，优先使用 req.user.user_id）
- */
-function getUserId(req) {
-  return req.user.user_id || req.user.userId || req.user.id;
-}
-
-/**
- * 根据经验值计算等级和称号
- * @param {number} exp - 当前经验值
- * @returns {{ level: number, title: string, currentLevelExp: number, nextLevelExp: number|null, expToNext: number|null }}
- */
-function calcLevel(exp) {
-  let current = LEVEL_CONFIG[0];
-  let next = LEVEL_CONFIG[1] || null;
-
-  for (let i = LEVEL_CONFIG.length - 1; i >= 0; i--) {
-    if (exp >= LEVEL_CONFIG[i].exp) {
-      current = LEVEL_CONFIG[i];
-      next = LEVEL_CONFIG[i + 1] || null;
-      break;
-    }
-  }
-
-  return {
-    level: current.level,
-    title: current.title,
-    currentLevelExp: current.exp,
-    nextLevelExp: next ? next.exp : null,
-    expToNext: next ? next.exp - exp : null,
-  };
-}
-
-/**
- * 确保用户在 user_economy 表中有记录，没有则自动创建
- */
-async function ensureEconomyRecord(db, userId) {
-  const existing = await db('user_economy').where({ user_id: userId }).first();
-  if (!existing) {
-    await db('user_economy').insert({ user_id: userId });
-  }
-  return;
-}
-
-/**
- * 确保用户在 user_levels 表中有记录，没有则自动创建
- */
-async function ensureLevelRecord(db, userId) {
-  const existing = await db('user_levels').where({ user_id: userId }).first();
-  if (!existing) {
-    await db('user_levels').insert({ user_id: userId });
-  }
-  return;
-}
-
 /**
  * 确保用户在 user_equipped 表中有记录，没有则自动创建
  */
@@ -167,28 +66,6 @@ async function ensureEquippedRecord(db, userId) {
     await db('user_equipped').insert({ user_id: userId });
   }
   return;
-}
-
-/**
- * 增加用户货币并记录交易
- */
-async function addCurrency(db, userId, currency, amount, action, description) {
-  const field = currency === 'pi' ? 'pi_keys' : 'alpha_keys';
-  const totalField = currency === 'pi' ? 'total_pi_earned' : 'total_alpha_earned';
-
-  await db('user_economy')
-    .where({ user_id: userId })
-    .increment(field, amount)
-    .increment(totalField, amount);
-
-  await db('transactions').insert({
-    user_id: userId,
-    currency,
-    amount,
-    type: 'earn',
-    action: action || null,
-    description: description || null,
-  });
 }
 
 /**
@@ -221,38 +98,6 @@ async function spendCurrency(db, userId, currency, amount, action, description) 
   });
 
   return true;
-}
-
-/**
- * 增加用户经验并更新等级
- * @returns {{ level: number, title: string, leveledUp: boolean }}
- */
-async function addExp(db, userId, expGained, action) {
-  await db('user_levels')
-    .where({ user_id: userId })
-    .increment('exp', expGained)
-    .increment('total_exp', expGained);
-
-  await db('exp_records').insert({
-    user_id: userId,
-    action: action || null,
-    exp_gained: expGained,
-  });
-
-  const record = await db('user_levels')
-    .where({ user_id: userId })
-    .first();
-
-  const levelInfo = calcLevel(record.exp);
-
-  // 如果等级发生变化，更新等级表
-  if (levelInfo.level !== record.level) {
-    await db('user_levels')
-      .where({ user_id: userId })
-      .update({ level: levelInfo.level, title: levelInfo.title });
-  }
-
-  return { ...levelInfo, leveledUp: levelInfo.level !== record.level };
 }
 
 // ========== 经济信息接口 ==========
@@ -343,6 +188,9 @@ async function getUserEquippedSummary(userId) {
       name_style: null,
       card_bg_id: null,
       chat_bubble_id: null,
+      cursor_id: null,
+      enter_effect_id: null,
+      loading_screen_id: null,
     };
   }
 
@@ -352,6 +200,9 @@ async function getUserEquippedSummary(userId) {
     name_style: equipped.name_style,
     card_bg_id: equipped.card_bg_id,
     chat_bubble_id: equipped.chat_bubble_id,
+    cursor_id: equipped.cursor_id,
+    enter_effect_id: equipped.enter_effect_id,
+    loading_screen_id: equipped.loading_screen_id,
   };
 
   // 查询各装备的 style_config
@@ -528,7 +379,7 @@ router.post('/equip', authenticateToken, async (req, res) => {
       });
     }
 
-    const validTypes = ['frame', 'accessory', 'name_style', 'card_bg', 'chat_bubble'];
+    const validTypes = ['frame', 'accessory', 'name_style', 'card_bg', 'chat_bubble', 'cursor', 'enter_effect', 'loading_screen'];
     if (!validTypes.includes(item_type)) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({
         code: RESPONSE_CODES.VALIDATION_ERROR,
@@ -556,17 +407,16 @@ router.post('/equip', authenticateToken, async (req, res) => {
       accessory: 'accessory_id',
       card_bg: 'card_bg_id',
       chat_bubble: 'chat_bubble_id',
+      cursor: 'cursor_id',
+      enter_effect: 'enter_effect_id',
+      loading_screen: 'loading_screen_id',
+      name_style: 'name_style',
     };
 
     if (fieldMap[item_type]) {
       await db('user_equipped')
         .where({ user_id: userId })
         .update({ [fieldMap[item_type]]: item_id });
-    } else if (item_type === 'name_style') {
-      // name_style 存 item_id
-      await db('user_equipped')
-        .where({ user_id: userId })
-        .update({ name_style: item_id });
     }
 
     // 更新背包中道具的 equipped 状态
@@ -602,7 +452,7 @@ router.post('/unequip', authenticateToken, async (req, res) => {
       });
     }
 
-    const validTypes = ['frame', 'accessory', 'name_style', 'card_bg', 'chat_bubble'];
+    const validTypes = ['frame', 'accessory', 'name_style', 'card_bg', 'chat_bubble', 'cursor', 'enter_effect', 'loading_screen'];
     if (!validTypes.includes(item_type)) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({
         code: RESPONSE_CODES.VALIDATION_ERROR,
@@ -619,6 +469,9 @@ router.post('/unequip', authenticateToken, async (req, res) => {
       name_style: 'name_style',
       card_bg: 'card_bg_id',
       chat_bubble: 'chat_bubble_id',
+      cursor: 'cursor_id',
+      enter_effect: 'enter_effect_id',
+      loading_screen: 'loading_screen_id',
     };
 
     const field = fieldMap[item_type];
@@ -788,6 +641,11 @@ router.post('/buy', authenticateToken, async (req, res) => {
     await ensureLevelRecord(db, userId);
     await addExp(db, userId, 10, 'shop_buy');
 
+    // 触发成就检查（非阻塞，失败不影响主流程）
+    checkAndUnlockAchievements(db, userId).catch(e => {
+      console.error('[Economy] 购买道具后成就检查失败:', e);
+    });
+
     console.log(`[Economy] 用户 ${userId} 购买道具: ${shopItem.name}`);
 
     res.json({
@@ -811,13 +669,150 @@ router.post('/buy', authenticateToken, async (req, res) => {
 
 // ========== 任务接口 ==========
 
-// GET /api/tasks - 获取任务列表
-router.get('/', authenticateToken, async (req, res) => {
+// POST /api/tasks/check-in - 每日签到
+router.post('/check-in', authenticateToken, async (req, res) => {
   try {
     const userId = getUserId(req);
     const db = getDB();
 
-    const taskType = req.query.type; // daily, weekly, main
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // 查询 daily_login 任务记录
+    const task = await db('user_tasks')
+      .where({ user_id: userId, task_id: 'daily_login', task_type: 'daily' })
+      .first();
+
+    // 检查今天是否已签到
+    if (task && task.progress >= 1 && task.reset_at) {
+      const resetDate = new Date(task.reset_at);
+      resetDate.setHours(0, 0, 0, 0);
+      if (resetDate.getTime() === today.getTime()) {
+        return res.json({
+          code: RESPONSE_CODES.SUCCESS,
+          data: { alreadyCheckedIn: true },
+          message: '今天已签到',
+        });
+      }
+    }
+
+    // 未签到，执行签到
+    await ensureEconomyRecord(db, userId);
+    await ensureLevelRecord(db, userId);
+
+    if (task) {
+      // 更新已有任务记录
+      await db('user_tasks')
+        .where({ id: task.id })
+        .update({ progress: 1, completed: true, reset_at: new Date() });
+    } else {
+      // 创建新的任务记录
+      await db('user_tasks').insert({
+        user_id: userId,
+        task_id: 'daily_login',
+        task_type: 'daily',
+        progress: 1,
+        target: 1,
+        completed: true,
+        reset_at: new Date(),
+      });
+    }
+
+    // 发放签到奖励：15 Pi + 30 EXP
+    await addCurrency(db, userId, 'pi', 15, 'daily_check_in', '每日签到奖励');
+    const levelResult = await addExp(db, userId, 30, 'daily_check_in');
+
+    // 标记签到任务为已领取（奖励已在签到时发放）
+    await db('user_tasks')
+      .where({ user_id: userId, task_id: 'daily_login', task_type: 'daily' })
+      .update({ claimed: true });
+
+    console.log(`[Economy] 用户 ${userId} 每日签到成功`);
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      data: {
+        alreadyCheckedIn: false,
+        rewards: { pi: 15, exp: 30 },
+        level: levelResult.level,
+        title: levelResult.title,
+        leveledUp: levelResult.leveledUp,
+      },
+      message: '签到成功',
+    });
+  } catch (error) {
+    console.error('[Economy] 每日签到失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      code: RESPONSE_CODES.ERROR,
+      message: '服务器内部错误',
+    });
+  }
+});
+
+// GET /api/tasks/list - 获取任务列表
+router.get('/list', authenticateToken, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const db = getDB();
+
+    // ========== 每日/每周任务重置检查 ==========
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 今天 0:00
+
+    // 计算本周一 0:00（每周任务重置点）
+    const dayOfWeek = now.getDay() || 7; // 周日=7
+    const monday = new Date(today);
+    monday.setDate(monday.getDate() - dayOfWeek + 1);
+
+    // 查询需要检查重置的任务（每日 + 每周）
+    const existingTasks = await db('user_tasks')
+      .where({ user_id: userId })
+      .whereIn('task_type', ['daily', 'weekly'])
+      .select('id', 'task_type', 'reset_at', 'progress', 'completed', 'claimed');
+
+    const resetBatch = [];
+    for (const task of existingTasks) {
+      const resetAt = task.reset_at ? new Date(task.reset_at) : null;
+      let shouldReset = false;
+
+      if (task.task_type === 'daily') {
+        // 每日任务：reset_at 不是今天则重置
+        if (!resetAt) {
+          shouldReset = true;
+        } else {
+          const resetDay = new Date(resetAt.getFullYear(), resetAt.getMonth(), resetAt.getDate());
+          shouldReset = resetDay.getTime() < today.getTime();
+        }
+      } else if (task.task_type === 'weekly') {
+        // 每周任务：reset_at 早于本周一则重置
+        if (!resetAt) {
+          shouldReset = true;
+        } else {
+          const resetDay = new Date(resetAt.getFullYear(), resetAt.getMonth(), resetAt.getDate());
+          shouldReset = resetDay.getTime() < monday.getTime();
+        }
+      }
+
+      if (shouldReset) {
+        resetBatch.push(task.id);
+      }
+    }
+
+    // 批量重置过期任务
+    if (resetBatch.length > 0) {
+      await db('user_tasks')
+        .whereIn('id', resetBatch)
+        .update({
+          progress: 0,
+          completed: false,
+          claimed: false,
+          reset_at: now,
+        });
+      console.log(`[Tasks] 重置了 ${resetBatch.length} 个过期任务 (用户: ${userId})`);
+    }
+
+    // ========== 查询任务列表 ==========
+    const taskType = req.query.type;
     const query = db('user_tasks').where({ user_id: userId });
 
     if (taskType) {
@@ -861,6 +856,7 @@ router.post('/claim', authenticateToken, async (req, res) => {
   try {
     const userId = getUserId(req);
     const db = getDB();
+    console.log('[Tasks/Claim] req.body:', JSON.stringify(req.body));
     const { task_id, task_type } = req.body;
 
     if (!task_id || !task_type) {
@@ -925,6 +921,11 @@ router.post('/claim', authenticateToken, async (req, res) => {
       .where({ id: task.id })
       .update({ claimed: true });
 
+    // 触发成就检查（非阻塞，失败不影响主流程）
+    checkAndUnlockAchievements(db, userId).catch(e => {
+      console.error('[Economy] 领取任务奖励后成就检查失败:', e);
+    });
+
     console.log(`[Economy] 用户 ${userId} 领取任务奖励: ${task_id} (${task_type})`);
 
     res.json({
@@ -938,135 +939,6 @@ router.post('/claim', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('[Economy] 领取任务奖励失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.ERROR,
-      message: '服务器内部错误',
-    });
-  }
-});
-
-// ========== 成就接口 ==========
-
-// GET /api/achievements - 获取成就列表
-router.get('/', authenticateToken, async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const db = getDB();
-
-    // 获取用户已完成的成就
-    const completed = await db('user_achievements')
-      .where({ user_id: userId })
-      .select('achievement_id', 'completed_at', 'claimed');
-
-    const completedMap = {};
-    completed.forEach(a => {
-      completedMap[a.achievement_id] = {
-        completed: true,
-        completed_at: a.completed_at,
-        claimed: a.claimed,
-      };
-    });
-
-    // 返回所有成就定义，合并用户完成状态
-    const allAchievements = Object.entries(ACHIEVEMENT_DEFINITIONS).map(([id, def]) => {
-      const rewards = ACHIEVEMENT_REWARDS[id] || { pi: 0, alpha: 0, exp: 0 };
-      const userProgress = completedMap[id] || {};
-      return {
-        achievement_id: id,
-        name: def.name,
-        description: def.description,
-        icon: def.icon,
-        reward_pi: rewards.pi,
-        reward_alpha: rewards.alpha,
-        reward_exp: rewards.exp,
-        completed: !!userProgress.completed,
-        completed_at: userProgress.completed_at || null,
-        claimed: !!userProgress.claimed,
-        progress: userProgress.completed ? 1 : 0,
-        target: 1,
-      };
-    });
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      data: allAchievements,
-      message: '获取成功',
-    });
-  } catch (error) {
-    console.error('[Economy] 获取成就列表失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
-      code: RESPONSE_CODES.ERROR,
-      message: '服务器内部错误',
-    });
-  }
-});
-
-// POST /api/achievements/claim - 领取成就奖励
-router.post('/claim', authenticateToken, async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const db = getDB();
-    const { achievement_id } = req.body;
-
-    if (!achievement_id) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({
-        code: RESPONSE_CODES.VALIDATION_ERROR,
-        message: '缺少 achievement_id 参数',
-      });
-    }
-
-    // 查询成就记录
-    const achievement = await db('user_achievements')
-      .where({ user_id: userId, achievement_id })
-      .first();
-
-    if (!achievement) {
-      return res.status(HTTP_STATUS.NOT_FOUND).json({
-        code: RESPONSE_CODES.NOT_FOUND,
-        message: '成就不存在',
-      });
-    }
-
-    if (achievement.claimed) {
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({
-        code: RESPONSE_CODES.VALIDATION_ERROR,
-        message: '奖励已领取',
-      });
-    }
-
-    const rewards = ACHIEVEMENT_REWARDS[achievement_id] || { pi: 0, alpha: 0, exp: 0 };
-
-    await ensureEconomyRecord(db, userId);
-    await ensureLevelRecord(db, userId);
-
-    // 发放奖励
-    if (rewards.pi > 0) {
-      await addCurrency(db, userId, 'pi', rewards.pi, 'achievement_claim', `领取成就奖励: ${achievement_id}`);
-    }
-    if (rewards.alpha > 0) {
-      await addCurrency(db, userId, 'alpha', rewards.alpha, 'achievement_claim', `领取成就奖励: ${achievement_id}`);
-    }
-    if (rewards.exp > 0) {
-      await addExp(db, userId, rewards.exp, 'achievement_claim');
-    }
-
-    // 标记为已领取
-    await db('user_achievements')
-      .where({ id: achievement.id })
-      .update({ claimed: true });
-
-    console.log(`[Economy] 用户 ${userId} 领取成就奖励: ${achievement_id}`);
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      data: {
-        achievement_id,
-        rewards,
-      },
-      message: '奖励领取成功',
-    });
-  } catch (error) {
-    console.error('[Economy] 领取成就奖励失败:', error);
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
       code: RESPONSE_CODES.ERROR,
       message: '服务器内部错误',

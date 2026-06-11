@@ -6,6 +6,7 @@ const config = require('../config/config');
 const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
 const { getIPLocation, getRealIP } = require('../utils/ipLocation');
 const axios = require('axios');
+const { trackLogin } = require('../utils/taskTracker');
 
 // Logto SDK 相关配置
 const LOGTO_CONFIG = {
@@ -344,7 +345,18 @@ router.post('/callback', async (req, res) => {
       nickname: user.nickname,
       logto_id: user.logto_id
     });
-    
+
+    // 更新任务进度（非阻塞）
+    try {
+      const { getDB: getDBForTask } = require('../utils/db');
+      const dbForTask = getDBForTask();
+      trackLogin(dbForTask, user.user_id).catch(e => {
+        console.error('[Logto] 更新登录任务失败:', e);
+      });
+    } catch (e) {
+      console.error('[Logto] 更新任务进度失败:', e);
+    }
+
     // 设置用户HttpOnly Cookie
     const isProduction = config.server.env === 'production';
     

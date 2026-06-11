@@ -55,8 +55,9 @@ const filesRoutes = require('./routes/files');
 // 导入MC游戏功能路由
 const yggdrasilRoutes = require('./routes/yggdrasil');
 const gameRoutes = require('./routes/game');
-// 导入经济系统路由
+// 经济系统路由
 const economyRoutes = require('./routes/economy');
+const achievementsRoutes = require('./routes/achievements');
 
 const app = express();
 
@@ -215,7 +216,7 @@ app.use('/api/game', gameLimiter, gameRoutes);
 app.use('/api/economy', economyRoutes);
 app.use('/api/shop', economyRoutes);
 app.use('/api/tasks', economyRoutes);
-app.use('/api/achievements', economyRoutes);
+app.use('/api/achievements', achievementsRoutes);
 
 // 错误处理中间件
 app.use((err, req, res, next) => {

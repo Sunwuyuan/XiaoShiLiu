@@ -6,6 +6,9 @@ const { authenticateToken, optionalAuth } = require('../middleware/auth');
 const NotificationHelper = require('../utils/notificationHelper');
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser');
 const { sanitizeContent } = require('../utils/contentSecurity');
+const economyRouter = require('./economy');
+const { checkAndUnlockAchievements } = require('./economyShared');
+const { trackTask, updateMainTaskProgress } = require('../utils/taskTracker');
 
 // 递归删除评论及其子评论，返回删除的评论总数
 async function deleteCommentRecursive(db, commentId) {
@@ -233,6 +236,68 @@ router.post('/', authenticateToken, async (req, res) => {
     commentData.reply_count = 0; // 新创建的评论默认无回复
 
     console.log('创建评论成功 - 用户ID: %s, 评论ID: %s', userId, commentId);
+
+    // 触发成就检查（非阻塞，失败不影响主流程）
+    try {
+      const { getDB } = require('../utils/db');
+      const dbForAchievement = getDB();
+      const userRow = await db('users').where({ id: userId }).select('user_id').first();
+      if (userRow && checkAndUnlockAchievements) {
+        checkAndUnlockAchievements(dbForAchievement, userRow.user_id).catch(e => {
+          console.error('[Comments] 发评论后成就检查失败:', e);
+        });
+      }
+    } catch (e) {
+      console.error('[Comments] 发评论后成就检查调用失败:', e);
+    }
+
+    // 更新任务进度（非阻塞）
+    try {
+      const { getDB: getDBForTask } = require('../utils/db');
+      const dbForTask = getDBForTask();
+      const taskUserRow = await db('users').where({ id: userId }).select('user_id').first();
+      if (taskUserRow) {
+        const postData = await db('posts').where({ id: post_id }).select('user_id').first();
+        const isSelfComment = postData && postData.user_id === userId;
+
+        // 评论自己帖子不算任务
+        if (!isSelfComment) {
+          // 检查今天是否已在此帖子下评论过（同一帖子每天只算一次）
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const tomorrow = new Date(today);
+          tomorrow.setDate(today.getDate() + 1);
+
+          const todayCommentsOnPost = await db('comments')
+            .where({
+              post_id: String(post_id),
+              user_id: String(userId)
+            })
+            .whereBetween('created_at', [today.toISOString(), tomorrow.toISOString()])
+            .count('* as count')
+            .first();
+
+          // 只有今天第一次评论此帖子才算任务
+          const isFirstCommentOnPostToday = todayCommentsOnPost.count <= 1;
+
+          if (isFirstCommentOnPostToday) {
+            trackTask(dbForTask, taskUserRow.user_id, 'comment').catch(e => {
+              console.error('[Comments] 更新每日评论任务失败:', e);
+            });
+            trackTask(dbForTask, taskUserRow.user_id, 'comment_weekly').catch(e => {
+              console.error('[Comments] 更新每周评论任务失败:', e);
+            });
+          }
+        }
+
+        // 主线评论任务（累计，不受自评论和重复限制）
+        const [commentCountResult] = await db('comments').where({ user_id: userId }).count('* as count');
+        const commentCount = commentCountResult.count;
+        updateMainTaskProgress(dbForTask, taskUserRow.user_id, 'main_comment10', commentCount).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[Comments] 更新任务进度失败:', e);
+    }
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useEconomyStore } from '@/stores/economy.js'
+import { checkIn } from '@/api/economy.js'
 import LoadingSpinner from '@/components/spinner/LoadingSpinner.vue'
 import EconomyStatusBar from '@/components/economy/EconomyStatusBar.vue'
 import messageManager from '@/utils/messageManager.js'
@@ -9,6 +10,10 @@ const economyStore = useEconomyStore()
 
 // 当前 Tab
 const activeTab = ref('daily')
+
+// 签到状态
+const checkedIn = ref(false)
+const checkingIn = ref(false)
 
 // Tab 选项
 const tabs = [
@@ -22,6 +27,46 @@ const taskList = computed(() => {
   if (!economyStore.tasks) return []
   return economyStore.tasks[activeTab.value] || []
 })
+
+// 检查是否已签到
+function checkSignInStatus() {
+  const dailyTasks = economyStore.tasks?.daily || []
+  const loginTask = dailyTasks.find(t => t.task_id === 'daily_login')
+  checkedIn.value = loginTask && loginTask.progress >= 1
+}
+
+// 每日签到
+async function handleCheckIn() {
+  if (checkingIn.value || checkedIn.value) return
+  checkingIn.value = true
+
+  try {
+    const res = await checkIn()
+    if (res.success) {
+      if (res.data.alreadyCheckedIn) {
+        messageManager.info('今天已签到')
+        checkedIn.value = true
+      } else {
+        const rewards = res.data.rewards || {}
+        const msg = []
+        if (rewards.pi) msg.push(`+${rewards.pi} Pi`)
+        if (rewards.exp) msg.push(`+${rewards.exp} EXP`)
+        messageManager.success(`签到成功！${msg.join(' ')}`)
+        checkedIn.value = true
+        // 刷新任务列表和经济信息
+        economyStore.fetchTasks()
+        economyStore.fetchEconomy()
+        economyStore.fetchLevel()
+      }
+    } else {
+      messageManager.error(res.message || '签到失败')
+    }
+  } catch (error) {
+    messageManager.error('签到失败')
+  } finally {
+    checkingIn.value = false
+  }
+}
 
 // 判断任务是否完成
 function isTaskCompleted(task) {
@@ -62,7 +107,9 @@ async function handleClaim(task) {
 }
 
 onMounted(() => {
-  economyStore.fetchTasks()
+  economyStore.fetchTasks().then(() => {
+    checkSignInStatus()
+  })
 })
 </script>
 
@@ -157,6 +204,14 @@ onMounted(() => {
             已领取
           </button>
           <button
+            v-else-if="task.task_id === 'daily_login' && !isTaskCompleted(task)"
+            class="btn btn-check-in"
+            :disabled="checkingIn"
+            @click="handleCheckIn"
+          >
+            {{ checkingIn ? '签到中...' : '签到' }}
+          </button>
+          <button
             v-else-if="isTaskCompleted(task)"
             class="btn btn-claim"
             :disabled="claimingId === task.task_id"
@@ -209,6 +264,29 @@ onMounted(() => {
   font-size: 14px;
   color: var(--text-color-secondary);
   margin: 0;
+}
+
+/* 签到按钮（任务项内） */
+.btn-check-in {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 16px;
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-check-in:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.btn-check-in:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Tab 切换 */

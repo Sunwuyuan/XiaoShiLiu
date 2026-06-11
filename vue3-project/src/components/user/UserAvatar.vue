@@ -30,6 +30,11 @@ const props = defineProps({
     type: Number,
     default: 0
   },
+  // 后端返回的等级称号（如 F1, Tab, Shift 等），优先使用
+  levelTitle: {
+    type: String,
+    default: ''
+  },
   showLevel: {
     type: Boolean,
     default: false
@@ -121,20 +126,19 @@ const accessoryIcon = computed(() => {
   return typeIcons[config.type] || ''
 })
 
-// 等级按键名
+// 等级按键名（优先使用后端返回的 title，fallback 与后端 LEVEL_CONFIG 一致）
 const levelKeyMap = computed(() => {
+  if (props.levelTitle) return props.levelTitle
   const lv = props.level
-  if (lv >= 50) return 'F12'
-  if (lv >= 40) return 'F11'
-  if (lv >= 30) return 'F10'
-  if (lv >= 20) return 'F9'
-  if (lv >= 15) return 'F8'
-  if (lv >= 10) return 'F7'
-  if (lv >= 7) return 'F6'
-  if (lv >= 5) return 'F5'
-  if (lv >= 3) return 'F4'
-  if (lv >= 2) return 'F3'
-  return 'F2'
+  if (lv >= 20) return 'Space'
+  if (lv >= 16) return 'Alt'
+  if (lv >= 11) return 'Ctrl'
+  if (lv >= 7) return 'Shift'
+  if (lv >= 4) return 'Tab'
+  if (lv >= 3) return 'F2'
+  if (lv >= 2) return 'F1'
+  if (lv >= 1) return 'Esc'
+  return ''
 })
 
 function handleAvatarError(event) {

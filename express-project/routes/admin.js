@@ -13,6 +13,9 @@ const {
 } = require('../utils/validationHelpers')
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser')
 const NotificationHelper = require('../utils/notificationHelper')
+const { trackTask, updateMainTaskProgress } = require('../utils/taskTracker')
+const economyRouter = require('./economy')
+const { checkAndUnlockAchievements } = require('./economyShared')
 const crypto = require('crypto')
 
 /**
@@ -841,11 +844,45 @@ router.put('/posts-audit/:id/approve', adminAuth, requirePermission('post_audit:
     }
 
     // 更新audit表中的审核记录
-    await db('audit').where({ type: 3, target_id: String(postId) }).update({ 
-      status: 1, 
-      audit_time: db.fn.now(), 
-      admin_id: adminId 
+    await db('audit').where({ type: 3, target_id: String(postId) }).update({
+      status: 1,
+      audit_time: db.fn.now(),
+      admin_id: adminId
     })
+
+    // 审核通过后更新用户任务进度（非阻塞）
+    try {
+      const postContentResult = await db('posts').where({ id: String(postId) }).select('user_id').first();
+      if (postContentResult) {
+        const authorId = postContentResult.user_id;
+        const author = await db('users').where({ id: authorId }).select('user_id').first();
+        if (author) {
+          const userId = author.user_id;
+
+          // 每周发帖任务
+          trackTask(db, userId, 'post_weekly').catch(e => {
+            console.error('[Admin] 更新每周发帖任务失败:', e);
+          });
+
+          // 主线发帖任务（累计已发布的帖子）
+          const [postCountResult] = await db('posts').where({ user_id: authorId, status: 0 }).count('* as count');
+          const postCount = postCountResult.count;
+          updateMainTaskProgress(db, userId, 'main_first_post', postCount).catch(() => {});
+          updateMainTaskProgress(db, userId, 'main_post5', postCount).catch(() => {});
+          updateMainTaskProgress(db, userId, 'main_post20', postCount).catch(() => {});
+          updateMainTaskProgress(db, userId, 'main_post50', postCount).catch(() => {});
+
+          // 触发成就检查
+          if (checkAndUnlockAchievements) {
+            checkAndUnlockAchievements(db, userId).catch(e => {
+              console.error('[Admin] 审核通过后成就检查失败:', e);
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[Admin] 审核通过后更新任务进度失败:', e);
+    }
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,

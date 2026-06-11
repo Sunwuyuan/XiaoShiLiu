@@ -4,6 +4,7 @@ const { HTTP_STATUS, RESPONSE_CODES, ERROR_MESSAGES } = require('../constants');
 const { getDB } = require('../utils/db');
 const { authenticateToken } = require('../middleware/auth');
 const NotificationHelper = require('../utils/notificationHelper');
+const { trackTask } = require('../utils/taskTracker');
 
 // 点赞/取消点赞
 router.post('/', authenticateToken, async (req, res) => {
@@ -129,6 +130,20 @@ router.post('/', authenticateToken, async (req, res) => {
         } catch (notifyError) {
           console.error('创建通知失败:', notifyError.message);
           // 通知失败不影响点赞结果
+        }
+      }
+
+      // 更新任务进度（非阻塞）
+      // 只给别人的帖子/评论点赞才算任务，且不能重复刷
+      if (targetUserId && targetUserId !== userId) {
+        try {
+          const likeUserRow = await db('users').where({ id: userId }).select('user_id').first();
+          if (likeUserRow) {
+            trackTask(db, likeUserRow.user_id, 'like').catch(() => {});
+            trackTask(db, likeUserRow.user_id, 'like_weekly').catch(() => {});
+          }
+        } catch (e) {
+          console.error('[Likes] 更新任务进度失败:', e);
         }
       }
 

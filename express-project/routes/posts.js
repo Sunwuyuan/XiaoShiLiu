@@ -7,6 +7,9 @@ const NotificationHelper = require('../utils/notificationHelper');
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser');
 const { batchCleanupFiles } = require('../utils/fileCleanup');
 const { sanitizeContent } = require('../utils/contentSecurity');
+const economyRouter = require('./economy');
+const { checkAndUnlockAchievements } = require('./economyShared');
+const { trackTask, updateMainTaskProgress } = require('../utils/taskTracker');
 const sharp = require('sharp');
 const crypto = require('crypto');
 
@@ -501,6 +504,48 @@ router.get('/:id', optionalAuth, async (req, res) => {
       }
     }
 
+    // 更新浏览任务进度（非阻塞）
+    // 只统计登录用户的浏览，且浏览自己帖子不算
+    if (currentUserId && currentUserId !== post.user_id) {
+      try {
+        const taskUserRow = await db('users').where({ id: currentUserId }).select('user_id').first();
+        if (taskUserRow) {
+          // 检查今天是否已浏览过此帖子（同一帖子每天只算一次）
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const tomorrow = new Date(today);
+          tomorrow.setDate(today.getDate() + 1);
+
+          const todayViews = await db('view_logs')
+            .where({
+              post_id: String(postId),
+              user_id: String(currentUserId)
+            })
+            .whereBetween('created_at', [today.toISOString(), tomorrow.toISOString()])
+            .count('* as count')
+            .first();
+
+          // 只有今天第一次浏览此帖子才算任务
+          if (!todayViews || todayViews.count <= 1) {
+            trackTask(db, taskUserRow.user_id, 'browse').catch(() => {});
+          }
+
+          // 记录浏览日志（用于去重）
+          try {
+            await db('view_logs').insert({
+              post_id: String(postId),
+              user_id: String(currentUserId),
+              created_at: new Date().toISOString()
+            });
+          } catch (e) {
+            // view_logs 表可能不存在，忽略错误
+          }
+        }
+      } catch (e) {
+        console.error('[Posts] 更新浏览任务失败:', e.message);
+      }
+    }
+
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
@@ -639,6 +684,32 @@ router.post('/', authenticateToken, async (req, res) => {
         });
       } catch (error) {
         console.error('创建审核记录失败:', error);
+      }
+    }
+
+    // 帖子直接发布(status=0)时，触发成就检查和任务进度更新
+    if (status === 0) {
+      try {
+        const taskUserRow = await db('users').where({ id: userId }).select('user_id').first();
+        if (taskUserRow) {
+          // 成就检查
+          if (checkAndUnlockAchievements) {
+            checkAndUnlockAchievements(db, taskUserRow.user_id).catch(e => {
+              console.error('[Posts] 发帖后成就检查失败:', e);
+            });
+          }
+          // 每周发帖任务
+          trackTask(db, taskUserRow.user_id, 'post_weekly').catch(() => {});
+          // 主线发帖任务
+          const [postCountResult] = await db('posts').where({ user_id: userId, status: 0 }).count('* as count');
+          const postCount = postCountResult.count;
+          updateMainTaskProgress(db, taskUserRow.user_id, 'main_first_post', postCount).catch(() => {});
+          updateMainTaskProgress(db, taskUserRow.user_id, 'main_post5', postCount).catch(() => {});
+          updateMainTaskProgress(db, taskUserRow.user_id, 'main_post20', postCount).catch(() => {});
+          updateMainTaskProgress(db, taskUserRow.user_id, 'main_post50', postCount).catch(() => {});
+        }
+      } catch (e) {
+        console.error('[Posts] 发帖后任务/成就更新失败:', e);
       }
     }
 

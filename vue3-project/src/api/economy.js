@@ -30,14 +30,13 @@ export const getShopItems = (params) => request.get('/shop/items', { params })
 // 购买道具
 export const buyItem = (data) => request.post('/shop/buy', data)
 
-// 获取任务列表
-export const getTasks = () => request.get('/tasks')
-
-// 领取任务奖励
+// 任务
+export const getTasks = () => request.get('/tasks/list')
 export const claimTask = (data) => request.post('/tasks/claim', data)
 
-// 获取成就列表
-export const getAchievements = () => request.get('/achievements')
+// 每日签到
+export const checkIn = () => request.post('/tasks/check-in')
 
-// 领取成就奖励
+// 成就
+export const getAchievements = () => request.get('/achievements/list')
 export const claimAchievement = (data) => request.post('/achievements/claim', data)

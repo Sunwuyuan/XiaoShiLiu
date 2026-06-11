@@ -123,6 +123,7 @@ onMounted(() => {
               :frameConfig="economyStore.equipped?.frame_config"
               :accessoryConfig="economyStore.equipped?.accessory_config"
               :level="economyStore.currentLevel"
+              :levelTitle="economyStore.currentLevelTitle"
               size="sm"
               class="sidebar-avatar"
             />
@@ -132,6 +133,7 @@ onMounted(() => {
               :nickname="userStore.userInfo?.nickname || menuItems[4].label"
               :styleConfig="economyStore.equipped?.name_style_config"
               :level="economyStore.currentLevel"
+              :levelTitle="economyStore.currentLevelTitle"
             />
           </span>
         </RouterLink>

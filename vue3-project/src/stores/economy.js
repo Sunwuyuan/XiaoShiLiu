@@ -75,6 +75,9 @@ export const useEconomyStore = defineStore('economy', () => {
   // 当前等级
   const currentLevel = computed(() => level.value?.level ?? 0)
 
+  // 当前等级称号
+  const currentLevelTitle = computed(() => level.value?.title ?? '')
+
   // 当前经验值
   const currentExp = computed(() => level.value?.exp ?? 0)
 
@@ -365,6 +368,7 @@ export const useEconomyStore = defineStore('economy', () => {
     piBalance,
     alphaBalance,
     currentLevel,
+    currentLevelTitle,
     currentExp,
     requiredExp,
     expPercentage,

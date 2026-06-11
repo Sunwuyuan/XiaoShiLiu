@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useEconomyStore } from '@/stores/economy.js'
 import LoadingSpinner from '@/components/spinner/LoadingSpinner.vue'
 import EconomyStatusBar from '@/components/economy/EconomyStatusBar.vue'
+import ShopItemPreview from '@/components/economy/ShopItemPreview.vue'
 import messageManager from '@/utils/messageManager.js'
 
 const economyStore = useEconomyStore()
@@ -18,7 +19,10 @@ const categories = [
   { id: 'accessory', label: '头饰' },
   { id: 'name_style', label: '用户名' },
   { id: 'card_bg', label: '背景' },
-  { id: 'chat_bubble', label: '气泡' }
+  { id: 'chat_bubble', label: '气泡' },
+  { id: 'cursor', label: '光标' },
+  { id: 'enter_effect', label: '入场' },
+  { id: 'loading_screen', label: '加载' }
 ]
 
 // 稀有度选项
@@ -205,18 +209,7 @@ onMounted(() => {
         :style="getRarityBorderStyle(item.rarity)"
       >
         <div class="item-preview" :style="getRarityBgStyle(item.rarity)">
-          <img
-            v-if="item.image"
-            :src="item.image"
-            :alt="item.name"
-            class="item-image"
-          />
-          <div v-else class="item-placeholder">
-            <svg viewBox="0 0 48 48" fill="none" class="placeholder-icon">
-              <rect x="8" y="8" width="32" height="32" rx="8" stroke="currentColor" stroke-width="2" opacity="0.3"/>
-              <path d="M24 16v16M16 24h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
-            </svg>
-          </div>
+          <ShopItemPreview :item="item" />
         </div>
 
         <div class="item-info">

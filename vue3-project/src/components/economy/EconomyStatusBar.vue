@@ -61,7 +61,7 @@ onMounted(() => {
   border-radius: 12px;
   margin-bottom: 16px;
   gap: 12px;
-  flex-wrap: wrap;
+  overflow: hidden;
 }
 
 .status-left {
@@ -106,8 +106,8 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   flex: 1;
-  min-width: 80px;
-  max-width: 200px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .exp-bar {
