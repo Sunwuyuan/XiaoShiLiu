@@ -20,7 +20,7 @@
           <a href="https://developer.dy.ci" class="nav-link" target="_blank">开发者</a>
         </div>
         <div class="nav-actions">
-          <a href="../explore" class="btn-primary" target="_blank">登录</a>
+          <button class="btn-primary" @click="authStore.openLoginModal()">登录</button>
         </div>
       </div>
     </nav>
@@ -202,6 +202,9 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
 
 const homeRef = ref(null)
 const cursorGlow = ref(null)

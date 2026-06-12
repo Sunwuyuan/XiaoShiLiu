@@ -25,6 +25,7 @@ import { useRouter } from 'vue-router'
 import SvgIcon from '@/components/SvgIcon.vue'
 import { useUserStore } from '@/stores/user.js'
 import { logtoApi } from '@/api/index.js'
+import { isTauri, getDeepLinkUrl, parseCallbackParams, clearDeepLinkUrl, DEEP_LINK_SCHEME } from '@/utils/tauri.js'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -38,68 +39,98 @@ const goHome = () => {
   router.push('/')
 }
 
+const processCallback = async (code, state, redirectUri) => {
+  loadingText.value = '正在获取用户信息...'
+
+  // 调用后端回调接口
+  console.log('开始调用后端 callback 接口...')
+  const response = await logtoApi.handleCallback({ code, state, redirectUri })
+
+  console.log('后端响应:', response)
+
+  if (response.success && response.data) {
+    loadingText.value = '正在同步登录状态...'
+
+    console.log('调用 userStore.loginWithLogto...')
+
+    // 使用专门的 Logto 登录处理方法
+    const result = await userStore.loginWithLogto(response.data)
+
+    console.log('loginWithLogto 结果:', result)
+
+    if (result.success) {
+      success.value = true
+      isLoading.value = false
+
+      console.log('当前登录状态检查:', {
+        userInfo: !!userStore.userInfo,
+        isLoggedIn: userStore.isLoggedIn
+      })
+
+      console.log('localStorage 检查:', {
+        userInfo: !!localStorage.getItem('userInfo')
+      })
+
+      console.log('等待 1.5 秒后跳转...')
+
+      setTimeout(() => {
+        console.log('跳转到首页...')
+        router.push('/')
+      }, 1500)
+    } else {
+      throw new Error(result.message)
+    }
+  } else {
+    throw new Error(response.message || '登录失败')
+  }
+}
+
 const handleCallback = async () => {
   try {
     console.log('=== Logto 回调开始处理 ===')
-    
-    // 获取 URL 参数
-    const urlParams = new URLSearchParams(window.location.search)
-    const code = urlParams.get('code')
-    const state = urlParams.get('state')
 
-    console.log('URL 参数:', { code, state })
+    let code = null
+    let state = null
+    // 先声明变量，确保后续使用时已定义
+    let redirectUri = window.location.origin + '/callback'
+
+    if (isTauri()) {
+      // === Tauri 模式：优先从深链接获取参数 ===
+      console.log('Tauri 环境：检查深链接回调...')
+      const deepLinkUrl = await getDeepLinkUrl()
+      if (deepLinkUrl) {
+        console.log('发现深链接回调:', deepLinkUrl)
+        clearDeepLinkUrl()
+        const params = parseCallbackParams(deepLinkUrl)
+        if (params && params.code) {
+          code = params.code
+          state = params.state
+          redirectUri = DEEP_LINK_SCHEME
+        }
+      }
+
+      // 深链接没有参数时，回退到 URL 参数（兼容直接访问 /callback 路由的情况）
+      if (!code) {
+        console.log('无深链接参数，回退到 URL 参数解析')
+        const urlParams = new URLSearchParams(window.location.search)
+        code = urlParams.get('code')
+        state = urlParams.get('state')
+        redirectUri = window.location.origin + '/callback'
+      }
+    } else {
+      // === Web 浏览器模式：从 URL 参数获取 ===
+      const urlParams = new URLSearchParams(window.location.search)
+      code = urlParams.get('code')
+      state = urlParams.get('state')
+    }
+
+    console.log('回调参数:', { code: !!code, state: !!state, redirectUri })
 
     if (!code) {
       throw new Error('缺少授权码')
     }
 
-    loadingText.value = '正在获取用户信息...'
-    
-    // 调用后端回调接口
-    console.log('开始调用后端 callback 接口...')
-    const response = await logtoApi.handleCallback({ code, state })
-
-    console.log('后端响应:', response)
-
-    if (response.success && response.data) {
-      loadingText.value = '正在同步登录状态...'
-      
-      console.log('调用 userStore.loginWithLogto...')
-      
-      // 使用专门的 Logto 登录处理方法
-      const result = await userStore.loginWithLogto(response.data)
-      
-      console.log('loginWithLogto 结果:', result)
-      
-      if (result.success) {
-        // 登录成功，不需要额外调用 getCurrentUser！
-        // 直接信任后端返回的用户数据
-        
-        success.value = true
-        isLoading.value = false
-
-        console.log('当前登录状态检查:', {
-          userInfo: !!userStore.userInfo,
-          isLoggedIn: userStore.isLoggedIn
-        })
-        
-        console.log('localStorage 检查:', {
-          userInfo: !!localStorage.getItem('userInfo')
-        })
-
-        console.log('等待 1.5 秒后跳转...')
-        
-        // 延迟跳转，确保所有状态都已更新完成
-        setTimeout(() => {
-          console.log('跳转到首页...')
-          router.push('/')
-        }, 1500)
-      } else {
-        throw new Error(result.message)
-      }
-    } else {
-      throw new Error(response.message || '登录失败')
-    }
+    await processCallback(code, state, redirectUri)
   } catch (err) {
     console.error('Logto 回调处理失败:', err)
     error.value = err.message || '登录失败，请稍后重试'

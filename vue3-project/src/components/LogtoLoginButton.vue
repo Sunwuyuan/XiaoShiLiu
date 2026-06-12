@@ -19,6 +19,15 @@
 import { ref, computed } from 'vue'
 import { logtoApi } from '@/api/index.js'
 import { useUserStore } from '@/stores/user.js'
+import {
+  isTauri,
+  isTauriDesktop,
+  openInBrowser,
+  waitForDeepLinkCallback,
+  parseCallbackParams,
+  clearDeepLinkUrl,
+  DEEP_LINK_SCHEME,
+} from '@/utils/tauri.js'
 
 const props = defineProps({
   buttonText: {
@@ -35,18 +44,58 @@ const userStore = useUserStore()
 const handleLogin = async () => {
   try {
     isLoading.value = true
-    
+
     // 获取 Logto 登录 URL
     const response = await logtoApi.getSignInUrl()
-    
+
     if (response.success && response.data) {
-      // 跳转到 Logto 登录页面
-      // 在实际部署中，这里应该配置正确的回调处理
-      console.log('跳转到 云认证 登录:', response.data.signInUrl)
-      
-      // 对于 SPA 应用，我们需要处理 OAuth 回调
-      // 这里我们打开一个新窗口或者重定向
-      window.location.href = response.data.signInUrl
+      let signInUrl = response.data.signInUrl
+
+      // 检测是否为 Tauri 桌面端（支持深链接协议回调）
+      const desktop = isTauri() ? await isTauriDesktop() : false
+
+      if (desktop) {
+        // === Tauri 桌面端模式：打开系统浏览器 + 深链接回调 ===
+        signInUrl = replaceRedirectUri(signInUrl, DEEP_LINK_SCHEME)
+        console.log('Tauri 桌面端模式：打开系统浏览器登录:', signInUrl)
+
+        await openInBrowser(signInUrl)
+
+        // 等待深链接回调
+        const callbackUrl = await waitForDeepLinkCallback(120000)
+        if (!callbackUrl) {
+          throw new Error('等待登录回调超时，请重试')
+        }
+
+        console.log('收到深链接回调:', callbackUrl)
+        clearDeepLinkUrl()
+
+        const params = parseCallbackParams(callbackUrl)
+        if (!params || !params.code) {
+          throw new Error('无效的登录回调参数')
+        }
+
+        // 调用后端完成登录
+        const cbResponse = await logtoApi.handleCallback({
+          code: params.code,
+          state: params.state,
+          redirect_uri: DEEP_LINK_SCHEME,
+        })
+
+        if (cbResponse.success && cbResponse.data) {
+          const result = await userStore.loginWithLogto(cbResponse.data)
+          if (result.success) {
+            emit('success', result)
+            return
+          }
+          throw new Error(result.message)
+        }
+        throw new Error(cbResponse.message || '登录失败')
+      } else {
+        // === Web 浏览器模式 / Tauri 移动端模式（原有逻辑）===
+        console.log('跳转到 云认证 登录:', response.data.signInUrl)
+        window.location.href = response.data.signInUrl
+      }
     } else {
       throw new Error(response.message || '获取登录地址失败')
     }
@@ -55,6 +104,19 @@ const handleLogin = async () => {
     emit('error', error)
   } finally {
     isLoading.value = false
+  }
+}
+
+/**
+ * 替换 URL 中的 redirect_uri 参数
+ */
+function replaceRedirectUri(url, newRedirectUri) {
+  try {
+    const urlObj = new URL(url)
+    urlObj.searchParams.set('redirect_uri', newRedirectUri)
+    return urlObj.toString()
+  } catch {
+    return url
   }
 }
 </script>

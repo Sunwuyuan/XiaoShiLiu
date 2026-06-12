@@ -1,0 +1,15 @@
+Windows Registry Editor Version 5.00
+
+; 注册 dynamic:// 自定义协议，用于 OAuth 登录回调
+; Logto 认证完成后浏览器通过此协议唤回悦社应用
+
+[HKEY_CLASSES_ROOT\dynamic]
+@="URL:Dynamic Protocol"
+"URL Protocol"=""
+
+[HKEY_CLASSES_ROOT\dynamic\shell]
+
+[HKEY_CLASSES_ROOT\dynamic\shell\open]
+
+[HKEY_CLASSES_ROOT\dynamic\shell\open\command]
+@="\"C:\\Users\\Classworks\\Desktop\\XiaoShiLiu\\vue3-project\\src-tauri\\target\\debug\\vue3-project.exe\" \"%1\""

@@ -335,6 +335,12 @@ const router = createRouter({
 // 全局前置守卫 - 根路径跳转逻辑
 router.beforeEach((to, from, next) => {
   if (to.path === '/') {
+    // Tauri 桌面端：直接进入 explore
+    if (window.__TAURI_INTERNALS__) {
+      next('/explore')
+      return
+    }
+    // Web 浏览器版：根据登录状态判断
     const userStore = useUserStore()
     if (userStore.isLoggedIn) {
       next('/explore')

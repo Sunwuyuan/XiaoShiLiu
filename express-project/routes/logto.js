@@ -28,13 +28,14 @@ async function checkLogtoColumnExists() {
 }
 
 // 获取 Logto Token（用户登录）
-async function getLogtoToken(code) {
+// redirectUri 可选参数：Tauri 桌面端传入 yueshe://callback，Web 端使用配置默认值
+async function getLogtoToken(code, redirectUri) {
   const tokenUrl = `${LOGTO_CONFIG.endpoint}/oidc/token`;
-  
+
   const params = new URLSearchParams();
   params.append('grant_type', 'authorization_code');
   params.append('code', code);
-  params.append('redirect_uri', config.logto.redirectUri);
+  params.append('redirect_uri', redirectUri || config.logto.redirectUri);
   params.append('client_id', LOGTO_CONFIG.appId);
   params.append('client_secret', LOGTO_CONFIG.appSecret);
 
@@ -215,6 +216,7 @@ async function findOrCreateUser(logtoUser, req) {
 }
 
 // Logto 登录 URL 生成
+// 支持通过 ?redirect_uri=... 查询参数自定义回调地址（用于 Tauri 桌面端深链接模式）
 router.get('/sign-in', async (req, res) => {
   try {
     if (!LOGTO_CONFIG.endpoint || !LOGTO_CONFIG.appId) {
@@ -225,7 +227,9 @@ router.get('/sign-in', async (req, res) => {
       });
     }
 
-    const redirectUri = encodeURIComponent(config.logto.redirectUri);
+    // 支持前端传入自定义 redirect_uri（如 Tauri 的 yueshe://callback）
+    const customRedirectUri = req.query.redirect_uri;
+    const redirectUri = encodeURIComponent(customRedirectUri || config.logto.redirectUri);
     const state = Math.random().toString(36).substring(2, 15);
     
     const signInUrl = `${LOGTO_CONFIG.endpoint}/oidc/auth?` +
@@ -255,9 +259,10 @@ router.get('/sign-in', async (req, res) => {
 });
 
 // Logto 回调处理
+// 支持请求体中传入 redirect_uri（Tauri 桌面端深链接模式需要与授权时一致）
 router.post('/callback', async (req, res) => {
   try {
-    const { code, state } = req.body;
+    const { code, state, redirect_uri: bodyRedirectUri } = req.body;
     
     if (!code) {
       console.error('回调请求缺少授权码');
@@ -282,8 +287,9 @@ router.post('/callback', async (req, res) => {
     }
 
     console.log('处理 Logto 回调，code:', code);
-    
-    const tokenData = await getLogtoToken(code);
+    console.log('使用的 redirect_uri:', bodyRedirectUri || config.logto.redirectUri);
+
+    const tokenData = await getLogtoToken(code, bodyRedirectUri);
     
     const logtoUser = await getLogtoUserInfo(tokenData.access_token);
     

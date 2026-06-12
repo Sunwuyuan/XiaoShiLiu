@@ -1140,7 +1140,7 @@ router.get('/friends', authenticateToken, async (req, res) => {
     const userId = req.user.id;
 
     const friends = await db('friends')
-      .where({ user_id: userId })
+      .where('friends.user_id', userId)
       .join('users', 'friends.friend_id', 'users.id')
       .select('users.id', 'users.nickname', 'users.avatar', 'friends.created_at as friend_since');
 

@@ -39,7 +39,16 @@ import SvgIcon from '@/components/SvgIcon.vue'
 import MessageToast from '@/components/MessageToast.vue'
 import { logtoApi } from '@/api/index.js'
 import { useUserStore } from '@/stores/user.js'
-import { useScrollLock } from '@/composables/useScrollLock'
+import { useScrollLock } from '@/composables/useScrollLock.js'
+import {
+  isTauri,
+  isTauriDesktop,
+  openInBrowser,
+  waitForDeepLinkCallback,
+  parseCallbackParams,
+  clearDeepLinkUrl,
+  DEEP_LINK_SCHEME,
+} from '@/utils/tauri.js'
 
 const emit = defineEmits(['close', 'success'])
 
@@ -56,7 +65,7 @@ const showToast = ref(false)
 const toastMessage = ref('')
 const toastType = ref('success')
 
-// 点击登录
+// 点击登录 - 支持 Web、Tauri 桌面端、Tauri 移动端三种模式
 const handleLogtoLogin = async () => {
   try {
     isSubmitting.value = true
@@ -66,8 +75,65 @@ const handleLogtoLogin = async () => {
     console.log('正在获取 Logto 登录地址...')
     const response = await logtoApi.getSignInUrl()
     if (response.success && response.data && response.data.signInUrl) {
-      console.log('跳转到 Logto 登录地址:', response.data.signInUrl)
-      window.location.href = response.data.signInUrl
+      let signInUrl = response.data.signInUrl
+
+      // 检测是否为 Tauri 桌面端（支持深链接协议回调）
+      const desktop = isTauri() ? await isTauriDesktop() : false
+
+      if (desktop) {
+        // === Tauri 桌面端模式：打开系统浏览器 + 深链接回调 ===
+        signInUrl = replaceRedirectUri(signInUrl, DEEP_LINK_SCHEME)
+        console.log('Tauri 桌面端模式：打开系统浏览器登录:', signInUrl)
+
+        // 关闭弹窗（登录过程在浏览器中进行）
+        closeModal()
+
+        // 在系统默认浏览器中打开 Logto 登录页
+        await openInBrowser(signInUrl)
+
+        // 显示"等待浏览器登录"提示
+        unifiedMessage.value = '请在浏览器中完成登录，完成后将自动返回...'
+
+        // 等待深链接回调（浏览器通过 dynamic:// 协议回调）
+        const callbackUrl = await waitForDeepLinkCallback(120000)
+
+        if (!callbackUrl) {
+          throw new Error('等待登录回调超时，请重试')
+        }
+
+        console.log('收到深链接回调:', callbackUrl)
+        clearDeepLinkUrl()
+
+        // 解析回调参数并处理登录
+        const params = parseCallbackParams(callbackUrl)
+        if (!params || !params.code) {
+          throw new Error('无效的登录回调参数')
+        }
+
+        // 调用后端完成 token 交换和用户创建
+        unifiedMessage.value = '正在完成登录...'
+        const cbResponse = await logtoApi.handleCallback({
+          code: params.code,
+          state: params.state,
+          redirect_uri: DEEP_LINK_SCHEME,
+        })
+
+        if (cbResponse.success && cbResponse.data) {
+          const result = await userStore.loginWithLogto(cbResponse.data)
+          if (result.success) {
+            emit('success')
+            showToastMessage('登录成功！', 'success')
+            return
+          }
+          throw new Error(result.message)
+        }
+        throw new Error(cbResponse.message || '登录失败')
+      } else {
+        // === Web 浏览器模式 / Tauri 移动端模式（原有逻辑）===
+        // 移动端运行在 WebView 中，直接在应用内跳转即可
+        console.log((isTauri() ? 'Tauri 移动端' : 'Web') + '模式：页面内跳转到 Logto 登录地址')
+        window.location.href = signInUrl
+      }
     } else {
       throw new Error(response.message || '获取登录地址失败')
     }
@@ -80,6 +146,19 @@ const handleLogtoLogin = async () => {
     }
   } finally {
     isSubmitting.value = false
+  }
+}
+
+/**
+ * 替换 URL 中的 redirect_uri 参数
+ */
+function replaceRedirectUri(url, newRedirectUri) {
+  try {
+    const urlObj = new URL(url)
+    urlObj.searchParams.set('redirect_uri', newRedirectUri)
+    return urlObj.toString()
+  } catch {
+    return url
   }
 }
 
