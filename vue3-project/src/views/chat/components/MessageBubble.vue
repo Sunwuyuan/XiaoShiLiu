@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import UserAvatar from '@/components/user/UserAvatar.vue'
 import UserName from '@/components/user/UserName.vue'
 import { useUserStore } from '@/stores/user.js'
 import { useChatStore } from '@/stores/chat.js'
+import { useImageCache } from '@/utils/imageCache.js'
 
 const props = defineProps({
   message: {
@@ -44,6 +45,25 @@ const replyTo = computed(() => props.message.reply_to)
 
 // 表情回应列表
 const reactions = computed(() => props.message.reactions || [])
+
+// 图片消息缓存
+const { getCachedUrl } = useImageCache()
+const imageCacheState = getCachedUrl(isImage.value ? props.message.content : '')
+
+watch(() => props.message.content, (newContent) => {
+  if (isImage.value) {
+    const newCached = getCachedUrl(newContent)
+    imageCacheState.url = newCached.url
+    imageCacheState.loading = newCached.loading
+    imageCacheState.error = newCached.error
+  }
+})
+
+// 缓存后的图片 URL（用于模板）
+const cachedImageUrl = computed(() => {
+  if (!isImage.value) return ''
+  return imageCacheState.url || props.message.content || ''
+})
 
 // 格式化时间
 function formatTime(timestamp) {
@@ -160,7 +180,7 @@ function hideReactionPicker() {
 
         <!-- 图片消息 -->
         <div v-if="isImage && !isRecalled" class="message-image">
-          <img :src="message.content" alt="图片" loading="lazy" />
+          <img :src="cachedImageUrl" alt="图片" loading="lazy" />
         </div>
 
         <!-- 文件消息 -->

@@ -1,10 +1,11 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import UserDisplay from '@/components/user/UserDisplay.vue'
 import UserAvatar from '@/components/user/UserAvatar.vue'
 import UserName from '@/components/user/UserName.vue'
 import { useChatStore } from '@/stores/chat.js'
 import { useUserStore } from '@/stores/user.js'
+import { chatApi } from '@/api/chat.js'
 
 const chatStore = useChatStore()
 const userStore = useUserStore()
@@ -12,6 +13,166 @@ const userStore = useUserStore()
 const emit = defineEmits(['select', 'newChat'])
 
 const searchKeyword = ref('')
+
+// 好友申请相关状态
+const showFriendRequests = ref(false)
+const friendRequests = ref([])
+const isLoadingRequests = ref(false)
+const showAddFriend = ref(false)
+const addFriendKeyword = ref('')
+const addFriendResults = ref([])
+const isSearchingUsers = ref(false)
+const friendsList = ref([])
+const sendFriendMessage = ref('')
+const isSendingRequest = ref(false)
+
+// 加载好友申请列表
+async function loadFriendRequests() {
+  if (isLoadingRequests.value) return
+  isLoadingRequests.value = true
+  try {
+    const res = await chatApi.getFriendRequests()
+    if (res.success && res.data) {
+      friendRequests.value = res.data.requests || []
+    }
+  } catch (error) {
+    console.error('加载好友申请失败:', error)
+  } finally {
+    isLoadingRequests.value = false
+  }
+}
+
+// 加载好友列表（用于添加好友时排除已有好友）
+async function loadFriends() {
+  try {
+    const res = await chatApi.getFriends()
+    if (res.success && res.data) {
+      friendsList.value = res.data.friends || []
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+// 接受好友申请
+async function acceptRequest(requestId) {
+  try {
+    const res = await chatApi.acceptFriendRequest(requestId)
+    if (res.success) {
+      friendRequests.value = friendRequests.value.filter(r => r.id !== requestId)
+      // 刷新好友列表
+      await loadFriends()
+    }
+  } catch (error) {
+    console.error('接受好友申请失败:', error)
+  }
+}
+
+// 拒绝好友申请
+async function rejectRequest(requestId) {
+  try {
+    const res = await chatApi.rejectFriendRequest(requestId)
+    if (res.success) {
+      friendRequests.value = friendRequests.value.filter(r => r.id !== requestId)
+    }
+  } catch (error) {
+    console.error('拒绝好友申请失败:', error)
+  }
+}
+
+// 切换好友申请面板
+function toggleFriendRequests() {
+  showFriendRequests.value = !showFriendRequests.value
+  showAddFriend.value = false
+  if (showFriendRequests.value) {
+    loadFriendRequests()
+  }
+}
+
+// 切换添加好友面板
+function toggleAddFriend() {
+  showAddFriend.value = !showAddFriend.value
+  showFriendRequests.value = false
+  addFriendKeyword.value = ''
+  addFriendResults.value = []
+  if (showAddFriend.value) {
+    loadFriends()
+  }
+}
+
+// 搜索用户（用于添加好友）
+async function searchUsersToAdd() {
+  const keyword = addFriendKeyword.value.trim()
+  if (!keyword) {
+    addFriendResults.value = []
+    return
+  }
+
+  isSearchingUsers.value = true
+  try {
+    // 使用 user API 搜索用户
+    const { userApi } = await import('@/api/index.js')
+    const res = await userApi.searchUsers(keyword)
+    if (res.success && res.data) {
+      let results = res.data.users || []
+      // 排除自己和已是好友的用户
+      const friendIds = new Set(friendsList.value.map(f => String(f.id)))
+      results = results.filter(u =>
+        String(u.id) !== String(userStore.userInfo?.id) &&
+        !friendIds.has(String(u.id))
+      )
+      addFriendResults.value = results
+    }
+  } catch (error) {
+    console.error('搜索用户失败:', error)
+  } finally {
+    isSearchingUsers.value = false
+  }
+}
+
+// 防抖搜索
+let searchTimer = null
+function onAddFriendInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchUsersToAdd()
+  }, 300)
+}
+
+// 发送好友申请
+async function sendFriendRequest(userId) {
+  if (isSendingRequest.value) return
+  isSendingRequest.value = true
+  try {
+    const res = await chatApi.sendFriendRequest(userId, sendFriendMessage.value)
+    if (res.success) {
+      // 从搜索结果中移除该用户
+      addFriendResults.value = addFriendResults.value.filter(u => String(u.id) !== String(userId))
+      sendFriendMessage.value = ''
+
+      // 自动创建与该好友的私聊会话
+      try {
+        await chatStore.createPrivateConversation(userId)
+      } catch (e) {
+        console.warn('自动创建私聊会话失败:', e)
+      }
+
+      alert('好友申请已发送，已自动创建聊天会话')
+    } else {
+      alert(res.message || '发送失败')
+    }
+  } catch (error) {
+    console.error('发送好友申请失败:', error)
+    alert(error.message || '发送失败')
+  } finally {
+    isSendingRequest.value = false
+  }
+}
+
+// 组件挂载时加载好友列表
+onMounted(() => {
+  loadFriends()
+})
 
 // 过滤后的会话列表
 const filteredConversations = computed(() => {
@@ -113,7 +274,7 @@ function handleNewChat() {
 
 <template>
   <div class="conversation-list">
-    <!-- 顶部搜索和新建 -->
+    <!-- 顶部搜索、新建和好友操作 -->
     <div class="list-header">
       <div class="search-box">
         <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -127,12 +288,79 @@ function handleNewChat() {
           placeholder="搜索会话..."
         />
       </div>
-      <button class="new-chat-btn" @click="handleNewChat" title="新建聊天">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"/>
-          <line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-      </button>
+      <div class="header-actions">
+        <button class="action-btn" @click="toggleAddFriend" title="添加好友">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+            <circle cx="8.5" cy="7" r="4"/>
+            <line x1="20" y1="11" x2="20" y2="17"/>
+            <line x1="23" y1="14" x2="17" y2="14"/>
+          </svg>
+        </button>
+        <button class="action-btn friend-request-btn" @click="toggleFriendRequests" title="好友申请">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 01-3.46 0"/>
+          </svg>
+          <span v-if="friendRequests.length > 0 && !showFriendRequests" class="request-badge">{{ friendRequests.length }}</span>
+        </button>
+        <button class="new-chat-btn" @click="handleNewChat" title="新建聊天">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 好友申请面板 -->
+    <div v-if="showFriendRequests" class="friend-panel">
+      <div class="panel-header">
+        <h4 class="panel-title">好友申请</h4>
+        <button class="panel-close" @click="showFriendRequests = false">&times;</button>
+      </div>
+      <div class="panel-content">
+        <div v-if="isLoadingRequests" class="panel-loading">加载中...</div>
+        <div v-else-if="friendRequests.length === 0" class="panel-empty">暂无好友申请</div>
+        <div v-else class="request-list">
+          <div v-for="request in friendRequests" :key="request.id" class="request-item">
+            <UserDisplay :user="request.from_user || request.user" :clickable="false" avatar-size="sm" />
+            <div class="request-actions">
+              <button class="req-btn req-btn--accept" @click="acceptRequest(request.id)">接受</button>
+              <button class="req-btn req-btn--reject" @click="rejectRequest(request.id)">拒绝</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加好友面板 -->
+    <div v-if="showAddFriend" class="friend-panel">
+      <div class="panel-header">
+        <h4 class="panel-title">添加好友</h4>
+        <button class="panel-close" @click="showAddFriend = false">&times;</button>
+      </div>
+      <div class="panel-content">
+        <div class="add-friend-search">
+          <input
+            v-model="addFriendKeyword"
+            type="text"
+            class="add-friend-input"
+            placeholder="搜索用户昵称或ID..."
+            @input="onAddFriendInput"
+          />
+        </div>
+        <div v-if="isSearchingUsers" class="panel-loading">搜索中...</div>
+        <div v-else-if="addFriendKeyword && addFriendResults.length === 0" class="panel-empty">未找到用户</div>
+        <div v-else class="user-search-list">
+          <div v-for="user in addFriendResults" :key="user.id" class="user-item">
+            <UserDisplay :user="user" :clickable="false" avatar-size="sm" />
+            <button class="add-btn" @click="sendFriendRequest(user.id)" :disabled="isSendingRequest">
+              {{ isSendingRequest ? '发送中...' : '添加' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 会话列表 -->
@@ -260,6 +488,210 @@ function handleNewChat() {
 
 .new-chat-btn:hover {
   background: var(--primary-color-dark);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-color-tertiary);
+  color: var(--text-color-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.action-btn:hover {
+  background: var(--bg-color-secondary);
+  color: var(--text-color-primary);
+}
+
+.friend-request-btn {
+  position: relative;
+}
+
+.request-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger-color);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 好友面板 */
+.friend-panel {
+  border-bottom: 1px solid var(--border-color-primary);
+  background: var(--bg-color-primary);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 8px;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color-primary);
+}
+
+.panel-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-color-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.panel-close:hover {
+  color: var(--text-color-primary);
+}
+
+.panel-content {
+  padding: 0 12px 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.panel-loading,
+.panel-empty {
+  text-align: center;
+  padding: 20px;
+  font-size: 13px;
+  color: var(--text-color-tertiary);
+}
+
+.request-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.request-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  background: var(--bg-color-secondary);
+  border-radius: 8px;
+}
+
+.request-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.req-btn {
+  padding: 4px 12px;
+  border-radius: 12px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.req-btn--accept {
+  background: var(--primary-color);
+  color: var(--text-color-inverse);
+}
+
+.req-btn--accept:hover {
+  background: var(--primary-color-dark);
+}
+
+.req-btn--reject {
+  background: var(--bg-color-tertiary);
+  color: var(--text-color-secondary);
+}
+
+.req-btn--reject:hover {
+  background: var(--border-color-secondary);
+}
+
+.add-friend-search {
+  margin-bottom: 10px;
+}
+
+.add-friend-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color-secondary);
+  border-radius: 18px;
+  font-size: 13px;
+  background: var(--bg-color-secondary);
+  color: var(--text-color-primary);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.add-friend-input:focus {
+  border-color: var(--primary-color);
+}
+
+.add-friend-input::placeholder {
+  color: var(--text-color-quaternary);
+}
+
+.user-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  background: var(--bg-color-secondary);
+  border-radius: 8px;
+}
+
+.add-btn {
+  padding: 4px 14px;
+  border-radius: 12px;
+  border: none;
+  background: var(--primary-color);
+  color: var(--text-color-inverse);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-btn:hover:not(:disabled) {
+  background: var(--primary-color-dark);
+}
+
+.add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .conversation-items {

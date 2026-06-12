@@ -1,0 +1,9 @@
+[source.crates-io]
+replace-with = 'ustc'
+
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+
+# 如果中科大源不行，可以换成清华源：
+# [source.tuna]
+# registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"

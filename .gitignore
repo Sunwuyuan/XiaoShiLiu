@@ -54,3 +54,5 @@ SECURITY_AUDIT*.md
 keys/*
 express-project/keys/private.pem
 express-project/keys/public.pem
+
+target/

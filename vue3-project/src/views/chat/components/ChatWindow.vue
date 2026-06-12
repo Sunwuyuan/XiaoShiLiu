@@ -24,89 +24,214 @@ const showSettingsPanel = ref(false)
 const contextMenu = ref({ show: false, message: null, x: 0, y: 0 })
 let menuJustOpened = false
 
-// 好友系统
-const showFriendRequests = ref(false)
-const friendRequests = ref([])
-const friendRequestCount = ref(0)
-const addFriendId = ref('')
-const friendSearchResult = ref(null)
+// 会话设置相关状态
+const isEditingTitle = ref(false)
+const editConversationTitle = ref('')
+const isMuted = ref(false)
+const showInvitePanel = ref(false)
+const inviteKeyword = ref('')
+const inviteResults = ref([])
+const isInviting = ref(false)
+const isLeaving = ref(false)
 
-// 加载好友申请
-async function loadFriendRequests() {
+// 获取当前用户在会话中的角色
+const myRole = computed(() => {
+  const conv = chatStore.currentConversation
+  if (!conv || !conv.members) return null
+  const me = conv.members.find(m => String(m.user_id) === String(currentUserId.value))
+  return me?.role || 'member'
+})
+
+// 是否可以管理群聊（owner 或 admin）
+const canManageGroup = computed(() => {
+  if (!isGroup.value) return false
+  return myRole.value === 'owner' || myRole.value === 'admin'
+})
+
+// 加载会话详情（获取完整成员列表）
+async function loadConversationDetail() {
+  const convId = chatStore.currentConversation?.id
+  if (!convId) return
   try {
-    const res = await chatApi.getFriendRequests()
-    if (res.success) {
-      friendRequests.value = res.data.requests || []
-      friendRequestCount.value = friendRequests.value.length
+    const res = await chatApi.getConversation(convId)
+    if (res.success && res.data) {
+      // 更新当前会话信息
+      Object.assign(chatStore.currentConversation, res.data)
+      isMuted.value = !!res.data.is_muted
     }
-  } catch (e) {
-    // ignore
+  } catch (error) {
+    console.error('加载会话详情失败:', error)
   }
 }
 
-// 搜索用户
-async function searchFriendUser() {
-  if (!addFriendId.value.trim()) return
+// 打开设置面板时加载详情
+watch(showSettingsPanel, async (val) => {
+  if (val) {
+    editConversationTitle.value = chatStore.currentConversation?.title || ''
+    await loadConversationDetail()
+  }
+})
+
+// 修改会话标题（仅群聊）
+async function saveConversationTitle() {
+  const convId = chatStore.currentConversation?.id
+  if (!convId || !editConversationTitle.value.trim()) return
   try {
-    const res = await userApi.searchUsers(addFriendId.value.trim(), { limit: 5 })
-    if (res.success && res.data?.users?.length > 0) {
-      const user = res.data.users.find(u => String(u.id) !== String(userStore.userInfo?.id))
-      if (user) {
-        // 检查好友关系
-        const friendRes = await chatApi.checkFriend(user.id)
-        const isFriend = friendRes.success && friendRes.data?.is_friend
-        friendSearchResult.value = {
-          ...user,
-          _status: isFriend ? 'friend' : 'none'
-        }
-      } else {
-        friendSearchResult.value = null
-      }
+    const res = await chatApi.updateConversation(convId, { title: editConversationTitle.value.trim() })
+    if (res.success) {
+      chatStore.currentConversation.title = editConversationTitle.value.trim()
+      isEditingTitle.value = false
     } else {
-      friendSearchResult.value = null
+      alert(res.message || '修改失败')
     }
-  } catch (e) {
-    // ignore
+  } catch (error) {
+    console.error('修改会话标题失败:', error)
+    alert('修改失败')
   }
 }
 
-// 发送好友申请
-async function sendFriendRequest(userId) {
+// 切换静音状态
+async function toggleMute() {
+  const convId = chatStore.currentConversation?.id
+  if (!convId) return
   try {
-    const res = await chatApi.sendFriendRequest(userId)
+    const res = await chatApi.toggleMute(convId)
     if (res.success) {
-      if (friendSearchResult.value) {
-        friendSearchResult.value._status = 'pending'
+      isMuted.value = !isMuted.value
+      // 更新本地会话数据
+      if (chatStore.currentConversation) {
+        chatStore.currentConversation.is_muted = isMuted.value ? 1 : 0
       }
     }
-  } catch (e) {
-    // ignore
+  } catch (error) {
+    console.error('切换静音失败:', error)
   }
 }
 
-// 接受好友申请
-async function acceptFriendRequest(requestId) {
+// 搜索用户邀请加入群聊
+async function searchUsersToInvite() {
+  const keyword = inviteKeyword.value.trim()
+  if (!keyword) {
+    inviteResults.value = []
+    return
+  }
+
   try {
-    const res = await chatApi.acceptFriendRequest(requestId)
-    if (res.success) {
-      friendRequests.value = friendRequests.value.filter(r => r.id !== requestId)
-      friendRequestCount.value = friendRequests.value.length
+    const res = await userApi.searchUsers(keyword, { limit: 10 })
+    if (res.success && res.data?.users) {
+      const conv = chatStore.currentConversation
+      // 排除已是成员的用户和自己
+      const memberIds = new Set((conv.members || []).map(m => String(m.user_id)))
+      inviteResults.value = res.data.users.filter(u =>
+        String(u.id) !== String(currentUserId.value) &&
+        !memberIds.has(String(u.id))
+      )
     }
-  } catch (e) {
-    // ignore
+  } catch (error) {
+    console.error('搜索用户失败:', error)
   }
 }
 
-// 拒绝好友申请
-async function rejectFriendRequest(requestId) {
+let inviteSearchTimer = null
+function onInviteInput() {
+  if (inviteSearchTimer) clearTimeout(inviteSearchTimer)
+  inviteSearchTimer = setTimeout(searchUsersToInvite, 300)
+}
+
+// 邀请成员加入群聊
+async function inviteMember(userId) {
+  const convId = chatStore.currentConversation?.id
+  if (!convId || isInviting.value) return
+  isInviting.value = true
   try {
-    const res = await chatApi.rejectFriendRequest(requestId)
+    const res = await chatApi.inviteMembers(convId, [userId])
     if (res.success) {
-      friendRequests.value = friendRequests.value.filter(r => r.id !== requestId)
-      friendRequestCount.value = friendRequests.value.length
+      inviteResults.value = inviteResults.value.filter(u => String(u.id) !== String(userId))
+      inviteKeyword.value = ''
+      // 重新加载会话详情
+      await loadConversationDetail()
+      alert('邀请成功')
+    } else {
+      alert(res.message || '邀请失败')
     }
-  } catch (e) {
-    // ignore
+  } catch (error) {
+    console.error('邀请成员失败:', error)
+    alert('邀请失败')
+  } finally {
+    isInviting.value = false
+  }
+}
+
+// 移除群成员
+async function removeMember(userId) {
+  const convId = chatStore.currentConversation?.id
+  if (!convId) return
+  if (!confirm('确定要移除该成员吗？')) return
+  try {
+    const res = await chatApi.removeMember(convId, userId)
+    if (res.success) {
+      await loadConversationDetail()
+    } else {
+      alert(res.message || '移除失败')
+    }
+  } catch (error) {
+    console.error('移除成员失败:', error)
+    alert('移除失败')
+  }
+}
+
+// 设置成员角色（提升为管理员或降级）
+async function changeMemberRole(userId, role) {
+  const convId = chatStore.currentConversation?.id
+  if (!convId) return
+  try {
+    const res = await chatApi.setMemberRole(convId, userId, role)
+    if (res.success) {
+      await loadConversationDetail()
+    } else {
+      alert(res.message || '操作失败')
+    }
+  } catch (error) {
+    console.error('修改角色失败:', error)
+    alert('操作失败')
+  }
+}
+
+// 退出群聊或删除会话
+async function leaveOrDeleteConversation() {
+  const conv = chatStore.currentConversation
+  if (!conv) return
+  const isOwner = myRole.value === 'owner'
+
+  const confirmMsg = isGroup.value
+    ? (isOwner ? '确定要解散该群聊吗？此操作不可恢复！' : '确定要退出该群聊吗？')
+    : '确定要删除该会话吗？'
+
+  if (!confirm(confirmMsg)) return
+
+  if (isLeaving.value) return
+  isLeaving.value = true
+
+  try {
+    const res = await chatApi.leaveConversation(conv.id)
+    if (res.success) {
+      showSettingsPanel.value = false
+      // 从会话列表中移除
+      const idx = chatStore.conversations.findIndex(c => c.id === conv.id)
+      if (idx > -1) {
+        chatStore.conversations.splice(idx, 1)
+      }
+      // 清空当前会话
+      chatStore.setCurrentConversation(null)
+      emit('back')
+    } else {
+      alert(res.message || '操作失败')
+    }
+  } catch (error) {
+    console.error('退出/删除会话失败:', error)
+    alert('操作失败')
+  } finally {
+    isLeaving.value = false
   }
 }
 
@@ -202,7 +327,7 @@ function handleScroll() {
 
 onMounted(() => {
   scrollToBottom()
-  loadFriendRequests()
+  document.addEventListener('click', onDocumentClick)
 })
 
 // 判断消息是否为自己发送
@@ -356,6 +481,19 @@ function formatDividerTime(timestamp) {
     minute: '2-digit'
   })
 }
+
+// 格式化时间（用于设置面板）
+function formatTime(timestamp) {
+  if (!timestamp) return '-'
+  const date = new Date(timestamp)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 </script>
 
 <template>
@@ -459,59 +597,131 @@ function formatDividerTime(timestamp) {
     <div v-if="showSettingsPanel" class="settings-overlay" @click="showSettingsPanel = false">
       <div class="settings-panel" @click.stop>
         <div class="settings-header">
-          <h3>聊天设置</h3>
+          <h3>会话设置</h3>
           <button class="settings-close-btn" @click="showSettingsPanel = false">&times;</button>
         </div>
+
         <div class="settings-body">
+          <!-- 会话基本信息 -->
           <div class="settings-section">
-            <div class="settings-label">好友申请</div>
-            <button class="settings-action-btn" @click="showFriendRequests = true">
-              查看好友申请
-              <span v-if="friendRequestCount > 0" class="badge">{{ friendRequestCount }}</span>
-            </button>
-          </div>
-          <div class="settings-section">
-            <div class="settings-label">添加好友</div>
-            <div class="add-friend-row">
-              <input
-                v-model="addFriendId"
-                class="add-friend-input"
-                placeholder="输入用户昵称搜索"
-                @keyup.enter="searchFriendUser"
-              />
-              <button class="add-friend-btn" @click="searchFriendUser" :disabled="!addFriendId.trim()">搜索</button>
+            <div class="section-title">会话信息</div>
+            <div class="info-row">
+              <span class="info-label">类型</span>
+              <span class="info-value">{{ isGroup ? '群聊' : '私聊' }}</span>
             </div>
-            <div v-if="friendSearchResult" class="friend-search-result">
-              <div class="friend-search-item">
-                <span>{{ friendSearchResult.nickname }}</span>
-                <button
-                  class="friend-action-btn"
-                  :disabled="friendSearchResult._status !== 'none'"
-                  @click="sendFriendRequest(friendSearchResult.id)"
-                >
-                  {{ friendSearchResult._status === 'none' ? '添加好友' : friendSearchResult._status === 'pending' ? '已申请' : '已是好友' }}
-                </button>
+            <!-- 群聊可编辑名称 -->
+            <div v-if="isGroup && canManageGroup" class="info-row info-row--editable">
+              <span class="info-label">名称</span>
+              <template v-if="isEditingTitle">
+                <input
+                  v-model="editConversationTitle"
+                  class="title-edit-input"
+                  @keyup.enter="saveConversationTitle"
+                  @keyup.escape="isEditingTitle = false"
+                  maxlength="20"
+                />
+                <button class="title-save-btn" @click="saveConversationTitle">保存</button>
+              </template>
+              <template v-else>
+                <span class="info-value info-value--clickable" @click="isEditingTitle = true">{{ chatStore.currentConversation?.title || '未命名' }}</span>
+                <svg class="edit-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" @click="isEditingTitle = true">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </template>
+            </div>
+            <div v-else-if="isGroup" class="info-row">
+              <span class="info-label">名称</span>
+              <span class="info-value">{{ chatStore.currentConversation?.title || '未命名' }}</span>
+            </div>
+            <div v-else class="info-row">
+              <span class="info-label">对方</span>
+              <UserDisplay v-if="otherUser" :user="otherUser" :clickable="false" avatar-size="xs" />
+              <span v-else class="info-value">未知用户</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">创建时间</span>
+              <span class="info-value">{{ formatTime(chatStore.currentConversation?.created_at) }}</span>
+            </div>
+          </div>
+
+          <!-- 静音设置（所有会话通用） -->
+          <div class="settings-section">
+            <div class="section-title">通知设置</div>
+            <div class="toggle-row" @click="toggleMute">
+              <span class="toggle-label">消息免打扰</span>
+              <div class="toggle-switch" :class="{ 'toggle-switch--active': isMuted }">
+                <div class="toggle-knob"></div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- 好友申请列表 -->
-        <div v-if="showFriendRequests" class="friend-requests-panel">
-          <div class="settings-header">
-            <h3>好友申请</h3>
-            <button class="settings-close-btn" @click="showFriendRequests = false">&times;</button>
+          <!-- 群聊成员管理 -->
+          <div v-if="isGroup" class="settings-section">
+            <div class="section-title">
+              成员列表
+              <span class="member-count">({{ chatStore.currentConversation?.members?.length || 0 }}人)</span>
+            </div>
+            <div class="member-list">
+              <div v-for="member in chatStore.currentConversation?.members" :key="member.user_id" class="member-item">
+                <UserDisplay :user="member" :clickable="false" avatar-size="xs" />
+                <div class="member-role-badge" :class="'role-' + (member.role || 'member')">
+                  {{ member.role === 'owner' ? '群主' : member.role === 'admin' ? '管理员' : '成员' }}
+                </div>
+                <!-- 管理员操作：移除成员/修改角色 -->
+                <template v-if="canManageGroup && String(member.user_id) !== String(currentUserId)">
+                  <button
+                    v-if="member.role !== 'owner'"
+                    class="member-action-btn"
+                    @click="removeMember(member.user_id)"
+                    title="移除成员"
+                  >移除</button>
+                  <select
+                    v-if="myRole === 'owner' && member.role !== 'owner'"
+                    class="role-select"
+                    :value="member.role"
+                    @change="changeMemberRole(member.user_id, $event.target.value)"
+                  >
+                    <option value="member">设为成员</option>
+                    <option value="admin">设为管理员</option>
+                  </select>
+                </template>
+              </div>
+            </div>
+            <!-- 邀请成员按钮 -->
+            <button v-if="canManageGroup" class="invite-btn" @click="showInvitePanel = !showInvitePanel">
+              {{ showInvitePanel ? '取消邀请' : '+ 邀请成员' }}
+            </button>
+            <!-- 邀请成员搜索 -->
+            <div v-if="showInvitePanel" class="invite-panel">
+              <input
+                v-model="inviteKeyword"
+                class="invite-input"
+                placeholder="搜索用户昵称..."
+                @input="onInviteInput"
+              />
+              <div v-if="inviteResults.length > 0" class="invite-results">
+                <div v-for="user in inviteResults" :key="user.id" class="invite-user-item">
+                  <UserDisplay :user="user" :clickable="false" avatar-size="xs" />
+                  <button class="invite-action-btn" @click="inviteMember(user.id)" :disabled="isInviting">
+                    {{ isInviting ? '邀请中...' : '邀请' }}
+                  </button>
+                </div>
+              </div>
+              <div v-else-if="inviteKeyword" class="invite-empty">未找到可邀请的用户</div>
+            </div>
           </div>
-          <div v-if="friendRequests.length === 0" class="empty-requests">暂无好友申请</div>
-          <div v-for="req in friendRequests" :key="req.id" class="friend-request-item">
-            <div class="request-info">
-              <span class="request-name">{{ req.from_nickname }}</span>
-              <span v-if="req.message" class="request-message">{{ req.message }}</span>
-            </div>
-            <div class="request-actions">
-              <button class="accept-btn" @click="acceptFriendRequest(req.id)">接受</button>
-              <button class="reject-btn" @click="rejectFriendRequest(req.id)">拒绝</button>
-            </div>
+
+          <!-- 危险操作区 -->
+          <div class="settings-section settings-section--danger">
+            <div class="section-title">危险操作</div>
+            <button
+              class="danger-btn"
+              @click="leaveOrDeleteConversation"
+              :disabled="isLeaving"
+            >
+              {{ isLeaving ? '处理中...' : (isGroup ? (myRole === 'owner' ? '解散群聊' : '退出群聊') : '删除会话') }}
+            </button>
           </div>
         </div>
       </div>
@@ -729,6 +939,382 @@ function formatDividerTime(timestamp) {
   .back-btn {
     display: flex;
   }
+}
+
+/* 设置面板 */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-bg);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.settings-panel {
+  background: var(--bg-color-primary);
+  border-radius: 16px 16px 0 0;
+  width: 100%;
+  max-width: 420px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -4px 24px var(--shadow-color);
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color-primary);
+}
+
+.settings-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-color-primary);
+}
+
+.settings-close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--text-color-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.settings-close-btn:hover {
+  color: var(--text-color-primary);
+}
+
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.settings-section {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color-primary);
+}
+
+.settings-section--danger {
+  margin-top: 8px;
+  border-top: 1px solid var(--danger-color, #e8553a);
+  border-bottom: none;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-color-tertiary);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.member-count {
+  font-weight: 400;
+  color: var(--text-color-quaternary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* 信息行 */
+.info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  gap: 12px;
+}
+
+.info-row--editable {
+  flex-wrap: wrap;
+}
+
+.info-label {
+  font-size: 14px;
+  color: var(--text-color-secondary);
+  flex-shrink: 0;
+}
+
+.info-value {
+  font-size: 14px;
+  color: var(--text-color-primary);
+  text-align: right;
+}
+
+.info-value--clickable {
+  cursor: pointer;
+  color: var(--primary-color);
+}
+
+.info-value--clickable:hover {
+  text-decoration: underline;
+}
+
+.edit-icon {
+  color: var(--text-color-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.edit-icon:hover {
+  color: var(--primary-color);
+}
+
+.title-edit-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--primary-color);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--bg-color-secondary);
+  color: var(--text-color-primary);
+  outline: none;
+  min-width: 120px;
+}
+
+.title-save-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary-color);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.title-save-btn:hover {
+  background: var(--primary-color-dark);
+}
+
+/* 静音开关 */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  cursor: pointer;
+}
+
+.toggle-label {
+  font-size: 14px;
+  color: var(--text-color-primary);
+}
+
+.toggle-switch {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--border-color-secondary);
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-switch--active {
+  background: var(--primary-color);
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.toggle-switch--active .toggle-knob {
+  transform: translateX(20px);
+}
+
+/* 成员列表 */
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.member-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-color-secondary);
+  border-radius: 8px;
+}
+
+.member-role-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.role-owner {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+}
+
+.role-admin {
+  background: rgba(33, 150, 243, 0.15);
+  color: #2196f3;
+}
+
+.role-member {
+  background: var(--bg-color-tertiary);
+  color: var(--text-color-tertiary);
+}
+
+.member-action-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(232, 85, 58, 0.1);
+  color: var(--danger-color, #e8553a);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.member-action-btn:hover {
+  background: rgba(232, 85, 58, 0.2);
+}
+
+.role-select {
+  margin-left: auto;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color-secondary);
+  background: var(--bg-color-primary);
+  color: var(--text-color-primary);
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+}
+
+.invite-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 2px dashed var(--border-color-secondary);
+  background: transparent;
+  color: var(--primary-color);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.invite-btn:hover {
+  border-color: var(--primary-color);
+  background: rgba(var(--primary-color-rgb), 0.05);
+}
+
+.invite-panel {
+  margin-top: 10px;
+}
+
+.invite-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color-secondary);
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--bg-color-secondary);
+  color: var(--text-color-primary);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.invite-input:focus {
+  border-color: var(--primary-color);
+}
+
+.invite-results {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.invite-user-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  background: var(--bg-color-secondary);
+  border-radius: 8px;
+}
+
+.invite-action-btn {
+  padding: 4px 12px;
+  border-radius: 12px;
+  border: none;
+  background: var(--primary-color);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.invite-action-btn:hover:not(:disabled) {
+  background: var(--primary-color-dark);
+}
+
+.invite-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.invite-empty {
+  text-align: center;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-color-tertiary);
+}
+
+/* 危险操作 */
+.danger-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(232, 85, 58, 0.1);
+  color: var(--danger-color, #e8553a);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.danger-btn:hover:not(:disabled) {
+  background: rgba(232, 85, 58, 0.2);
+}
+
+.danger-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>
 

@@ -8,7 +8,10 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite build && vite preview --host"
+    "preview": "vite build && vite preview --host",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@logto/vue": "^3.0.0",
@@ -22,6 +25,7 @@
     "vue3-emoji-picker": "^1.1.8"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
     "@vitejs/plugin-vue": "^5.0.0",
     "fast-glob": "^3.3.3",
     "patch-package": "^8.0.0",

@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import defaultAvatar from '@/assets/imgs/avatar.png'
+import { useImageCache } from '@/utils/imageCache.js'
 
 const props = defineProps({
   avatar: {
@@ -47,7 +48,27 @@ const avatarSize = computed(() => sizeMap[props.size] || 40)
 const framePadding = computed(() => props.size === 'xs' ? 2 : props.size === 'sm' ? 3 : 4)
 const frameSize = computed(() => avatarSize.value + framePadding.value * 2)
 
-const avatarUrl = computed(() => props.avatar || defaultAvatar)
+const { getCachedUrl } = useImageCache()
+
+// 原始 URL（不变）
+const rawAvatarUrl = computed(() => props.avatar || defaultAvatar)
+
+// 带缓存的头像 URL
+const cachedAvatar = getCachedUrl(rawAvatarUrl.value)
+
+// 监听 avatar 变化时重新获取缓存
+watch(rawAvatarUrl, (newUrl) => {
+  const newCached = getCachedUrl(newUrl)
+  cachedAvatar.url = newCached.url
+  cachedAvatar.loading = newCached.loading
+  cachedAvatar.error = newCached.error
+})
+
+// 最终使用的 avatar URL（缓存命中用 Object URL，否则降级）
+const avatarUrl = computed(() => {
+  if (!cachedAvatar.loading && cachedAvatar.url) return cachedAvatar.url
+  return defaultAvatar // 加载中显示默认头像
+})
 
 // 解析 style_config
 function parseConfig(config) {
