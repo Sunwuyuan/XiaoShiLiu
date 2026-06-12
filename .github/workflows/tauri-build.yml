@@ -109,6 +109,11 @@ jobs:
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > /tmp/dynamic.jks
 
+      # Windows：启用 VBSCRIPT（WiX/MSI 打包必需）
+      - name: Enable VBSCRIPT (Windows)
+        if: matrix.os == 'x86_64-pc-windows-msvc'
+        run: dism /online /enable-feature /featurename:Microsoft-Windows-Scripting-VBScript /all /norestart
+
       # 构建 Tauri 应用
       - name: Build Tauri app (${{ matrix.os }})
         working-directory: vue3-project
@@ -129,7 +134,7 @@ jobs:
         with:
           name: dynamic-${{ matrix.os }}-${{ github.sha }}
           path: |
-            vue3-project/src-tauri/target/release/bundle/*.{dmg,app,deb,AppImage,msi,exe,nupkg,aab,apk,ipa}
+            vue3-project/src-tauri/target/${{ matrix.os }}/release/bundle/*.{dmg,app,deb,AppImage,msi,exe,nupkg,aab,apk,ipa}
           if-no-files-found: warn
           retention-days: 30
 
