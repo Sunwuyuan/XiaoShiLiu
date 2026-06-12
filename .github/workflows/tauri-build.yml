@@ -16,15 +16,15 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            os: darwin-aarch64
+            os: aarch64-apple-darwin
           - platform: ubuntu-latest
-            os: linux-x86_64-gnu
+            os: x86_64-unknown-linux-gnu
           - platform: windows-latest
-            os: windows-x86_64
+            os: x86_64-pc-windows-msvc
           - platform: macos-14
-            os: ios-aarch64
+            os: aarch64-apple-ios
           - platform: ubuntu-latest
-            os: android-arm64
+            os: aarch64-linux-android
 
     runs-on: ${{ matrix.platform }}
 
@@ -37,11 +37,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ (matrix.os == 'darwin-aarch64' && 'aarch64-apple-darwin') || (matrix.os == 'linux-x86_64-gnu' && 'x86_64-unknown-linux-gnu') || (matrix.os == 'windows-x86_64' && 'x86_64-pc-windows-msvc') || (matrix.os == 'ios-aarch64' && 'aarch64-apple-ios') || (matrix.os == 'android-arm64' && 'aarch64-linux-android') || '' }}
+          targets: ${{ matrix.os }}
 
       # 安装系统依赖（Linux 需要 GTK/WebKit 等库）
       - name: Install system dependencies (Linux)
-        if: matrix.platform == 'ubuntu-latest' && matrix.os != 'android-arm64'
+        if: matrix.platform == 'ubuntu-latest' && matrix.os != 'aarch64-linux-android'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -53,7 +53,7 @@ jobs:
 
       # Android：安装 NDK 和 SDK 构建工具
       - name: Install Android NDK
-        if: matrix.os == 'android-arm64'
+        if: matrix.os == 'aarch64-linux-android'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
@@ -75,7 +75,7 @@ jobs:
 
       # iOS：配置 Xcode
       - name: Setup Xcode (iOS)
-        if: matrix.os == 'ios-aarch64'
+        if: matrix.os == 'aarch64-apple-ios'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
@@ -95,7 +95,7 @@ jobs:
 
       # 准备签名密钥（桌面端）
       - name: Setup Tauri signing key
-        if: contains(matrix.os, 'darwin') || contains(matrix.os, 'linux-x86_64') || contains(matrix.os, 'windows')
+        if: contains(matrix.os, 'darwin') || contains(matrix.os, 'linux') || contains(matrix.os, 'windows')
         env:
           TAURI_PRIVATE_KEY_CONTENT: ${{ secrets.TAURI_PRIVATE_KEY }}
         working-directory: vue3-project
@@ -105,7 +105,7 @@ jobs:
 
       # 准备 Android 签名密钥库（JKS）
       - name: Setup Android keystore
-        if: matrix.os == 'android-arm64'
+        if: matrix.os == 'aarch64-linux-android'
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > /tmp/dynamic.jks
 
@@ -116,8 +116,8 @@ jobs:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           # Android 签名配置（keystore: dynamic.jks，别名: dyci）
-          ANDROID_NDK_HOME: ${{ matrix.os == 'android-arm64' && env.ANDROID_NDK_LATEST_HOME || '' }}
-          TAURI_ANDROID_KEYSTORE_PATH: ${{ matrix.os == 'android-arm64' && '/tmp/dynamic.jks' || '' }}
+          ANDROID_NDK_HOME: ${{ matrix.os == 'aarch64-linux-android' && env.ANDROID_NDK_LATEST_HOME || '' }}
+          TAURI_ANDROID_KEYSTORE_PATH: ${{ matrix.os == 'aarch64-linux-android' && '/tmp/dynamic.jks' || '' }}
           TAURI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           TAURI_ANDROID_KEY_ALIAS: dyci
           TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
