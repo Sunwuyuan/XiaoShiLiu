@@ -152,6 +152,10 @@ jobs:
         working-directory: vue3-project
         run: npm ci && npm run build
 
+      - name: Initialize Android project
+        working-directory: vue3-project
+        run: npx tauri android init
+
       - name: Setup Android keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > /tmp/dynamic.jks
@@ -234,7 +238,7 @@ jobs:
 
       - name: Build iOS App
         working-directory: vue3-project
-        run: npx tauri ios build --target aarch64-apple-ios
+        run: npx tauri ios build --target aarch64
 
       - name: List build outputs
         shell: bash
