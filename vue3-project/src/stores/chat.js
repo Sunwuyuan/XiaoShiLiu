@@ -66,8 +66,23 @@ export const useChatStore = defineStore('chat', () => {
     const token = localStorage.getItem('token') || localStorage.getItem('user_token') || ''
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     // WebSocket 需要直连后端，不走 Vite 代理（代理只支持 HTTP）
-    // 开发环境后端默认 3001，生产环境使用当前 host
-    const wsHost = import.meta.env.DEV ? 'localhost:3001' : window.location.host
+    // 开发环境后端默认 3001
+    // 生产环境：Web 用当前域名，Tauri 从 API 配置中提取真实后端地址
+    let wsHost
+    if (import.meta.env.DEV) {
+      wsHost = 'localhost:3001'
+    } else if (window.__TAURI_INTERNALS__) {
+      // Tauri 桌面端：从 API baseURL 提取主机名
+      const apiBaseURL = import.meta.env.VITE_API_BASE_URL || 'https://dy.ci/api'
+      try {
+        wsHost = new URL(apiBaseURL).host
+      } catch {
+        wsHost = 'dy.ci'
+      }
+    } else {
+      // Web 生产环境：使用当前访问域名
+      wsHost = window.location.host
+    }
     const wsUrl = `${wsProtocol}//${wsHost}/ws/chat?token=${encodeURIComponent(token)}`
 
     try {

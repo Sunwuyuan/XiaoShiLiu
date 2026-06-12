@@ -15,7 +15,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             println!("[Tauri] 单实例收到外部启动参数: {:?}", args);
             for arg in &args {
-                if arg.starts_with("dynamic://") || arg.starts_with("com.yueshe.app://") {
+                if arg.starts_with("dynamic://") || arg.starts_with("com.zhaishis.dynamic://") {
                     println!("[Tauri] 收到深链接回调: {}", arg);
                     if let Some(state) = app.try_state::<DeepLinkState>() {
                         *state.0.lock().unwrap() = Some(arg.clone());
@@ -30,7 +30,7 @@ pub fn run() {
             // 首次启动时检查命令行参数中的深链接
             let args: Vec<String> = std::env::args().collect();
             for arg in &args {
-                if arg.starts_with("dynamic://") || arg.starts_with("com.yueshe.app://") {
+                if arg.starts_with("dynamic://") || arg.starts_with("com.zhaishis.dynamic://") {
                     println!("[Tauri] 启动参数中发现深链接: {}", arg);
                     if let Some(state) = app.try_state::<DeepLinkState>() {
                         *state.0.lock().unwrap() = Some(arg.clone());

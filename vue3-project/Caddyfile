@@ -1,0 +1,39 @@
+dy.ci {
+    root * /var/www/dyci
+    encode gzip
+
+    # 前端首页添加 ALI 头（用于 authlib-injector 自动发现）
+    @homepage path /
+    handle @homepage {
+        file_server
+        header X-Authlib-Injector-API-Location /api/yggdrasil/
+    }
+
+    # API 代理（CORS 由后端 Express 统一处理，Caddy 仅做转发）
+    @api path /api/*
+    handle @api {
+        reverse_proxy localhost:3013 {
+            header_up Host {host}
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # WebSocket 代理（聊天功能需要）
+    @ws path /ws/*
+    handle @ws {
+        reverse_proxy localhost:3013 {
+            header_up Host {host}
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # 前端 SPA 刷新 404 回退
+    handle {
+        file_server
+        try_files {path} /index.html
+    }
+}

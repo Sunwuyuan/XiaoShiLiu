@@ -47,9 +47,9 @@ const config = {
     env: process.env.NODE_ENV || 'development'
   },
 
-  // CORS配置
+  // CORS配置（包含 Web 线上、开发环境、Tauri 桌面端）
   cors: {
-    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()) : ['http://localhost:5173', 'http://localhost:3001']
+    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()) : ['http://localhost:5173', 'http://localhost:3001', 'https://dy.ci', 'https://tauri.localhost']
   },
 
   // JWT配置
