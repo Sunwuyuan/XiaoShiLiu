@@ -340,7 +340,9 @@ async function findTokenByAccessToken(accessToken) {
   const row = await getDbInstance()('yggdrasil_tokens as t')
     .join('mc_profiles as p', 't.profile_id', 'p.id')
     .where('t.access_token', accessToken)
-    .where('t.expires_at', '>', getDbInstance().fn.now())
+    .where('t.expires_at', '>', getDbInstance().fn.now()) // 必须未过期
+    .where('t.is_revoked', 0)  // 必须未撤销（关键：防止注销/失效的token被使用）
+    .where('t.is_temporarily_invalidated', 0)  // 必须未暂时失效
     .orderBy('t.created_at', 'desc')
     .first();
 
@@ -352,6 +354,8 @@ async function findTokenByRefreshToken(refreshToken) {
     .join('mc_profiles as p', 't.profile_id', 'p.id')
     .where('t.refresh_token', refreshToken)
     .where('t.expires_at', '>', getDbInstance().fn.now())
+    .where('t.is_revoked', 0)  // 必须未撤销
+    .orderBy('t.created_at', 'desc')
     .first();
 
   return row || null;
@@ -380,31 +384,99 @@ async function markTokensAsTemporarilyInvalidated(profileId) {
 }
 
 async function invalidateAllTokens(profileId) {
+  // 改为软失效：标记所有token为已撤销，而非物理删除
+  // 这样可以立即生效且可追溯，避免数据库延迟问题
   const result = await getDbInstance()('yggdrasil_tokens')
     .where('profile_id', profileId)
-    .delete();
+    .where('is_revoked', 0) // 只更新未撤销的
+    .update({
+      is_revoked: 1,
+      revoked_at: getDbInstance().fn.now(),
+      revoked_reason: '用户登出'
+    });
 
+  console.log(`[Yggdrasil] 角色 ${profileId} 的 ${result} 个 Token 已标记为已撤销`);
   return result;
 }
 
 async function invalidateToken(accessToken) {
+  // 改为软失效：标记指定token为已撤销
   const result = await getDbInstance()('yggdrasil_tokens')
     .where('access_token', accessToken)
-    .delete();
+    .where('is_revoked', 0)
+    .update({
+      is_revoked: 1,
+      revoked_at: getDbInstance().fn.now(),
+      revoked_reason: '手动注销'
+    });
 
+  if (result > 0) {
+    console.log(`[Yggdrasil] Token ${accessToken.substring(0, 20)}... 已标记为已撤销`);
+  }
   return result > 0;
 }
 
 async function cleanupExpiredTokens() {
   try {
-    const result = await getDbInstance()('yggdrasil_tokens')
-      .where('expires_at', '<', getDbInstance().fn.now())
-      .delete();
+    const db = getDbInstance();
 
-    console.log(`清理了 ${result} 个过期Token`);
-    return result;
+    // 检查 is_revoked 字段是否存在（兼容未执行迁移的情况）
+    let hasRevokedColumn = false;
+    try {
+      const columnInfo = await db('yggdrasil_tokens').columnInfo();
+      hasRevokedColumn = 'is_revoked' in columnInfo;
+    } catch (e) {
+      console.warn('[Yggdrasil] 无法检查列信息，使用基本清理模式');
+    }
+
+    let total = 0;
+
+    if (hasRevokedColumn) {
+      // 完整清理模式：支持软删除
+      // 1. 物理删除已撤销且已过期的 token
+      const revokedResult = await db('yggdrasil_tokens')
+        .where('is_revoked', 1)
+        .where(function() {
+          this.where('expires_at', '<', db.fn.now())
+            .orWhereRaw("revoked_at + INTERVAL '7 days' < NOW()");
+        })
+        .delete();
+
+      if (revokedResult > 0) {
+        console.log(`[Yggdrasil] 清理了 ${revokedResult} 个已撤销的过期Token`);
+        total += revokedResult;
+      }
+
+      // 2. 删除未撤销但已过期的 token
+      const expiredResult = await db('yggdrasil_tokens')
+        .where('is_revoked', 0)
+        .where('expires_at', '<', db.fn.now())
+        .delete();
+
+      if (expiredResult > 0) {
+        console.log(`[Yggdrasil] 清理了 ${expiredResult} 个正常过期的Token`);
+        total += expiredResult;
+      }
+    } else {
+      // 基本清理模式：仅删除过期token（兼容旧表结构）
+      console.log('[Yggdrasil] 使用基本清理模式（未检测到 is_revoked 字段）');
+      const result = await db('yggdrasil_tokens')
+        .where('expires_at', '<', db.fn.now())
+        .delete();
+
+      if (result > 0) {
+        console.log(`[Yggdrasil] 清理了 ${result} 个过期Token`);
+        total = result;
+      }
+    }
+
+    if (total > 0) {
+      console.log(`[Yggdrasil] 累计清理 ${total} 个Token`);
+    }
+
+    return total;
   } catch (error) {
-    console.error('[Yggdrasil] 初始清理过期 Token 失败:', error.message);
+    console.error('[Yggdrasil] 清理过期 Token 失败:', error.message);
     return 0;
   }
 }

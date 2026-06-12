@@ -396,25 +396,49 @@ router.post('/authserver/validate', async (req, res) => {
     const { accessToken, clientToken } = req.body;
 
     if (!accessToken) {
+      console.log('[Yggdrasil] Validate失败: 缺少accessToken');
       return res.status(403).end();
     }
 
+    // 使用增强版的查询，已包含 is_revoked 检查
     const tokenRecord = await findTokenByAccessToken(accessToken);
 
     if (!tokenRecord) {
+      // Token 无效：可能被撤销、过期或不存在
+      const db = getDB();
+
+      // 检查是否被撤销
+      const revokedToken = await db('yggdrasil_tokens')
+        .where('access_token', accessToken)
+        .where('is_revoked', 1)
+        .first();
+
+      if (revokedToken) {
+        console.log(`[Yggdrasil] ❌ Validate失败: Token已被撤销 - 原因: ${revokedToken.revoked_reason}, 时间: ${revokedToken.revoked_at}`);
+      } else {
+        // 检查是否过期
+        const expiredToken = await db('yggdrasil_tokens')
+          .where('access_token', accessToken)
+          .first();
+
+        if (expiredToken) {
+          console.log(`[Yggdrasil] ❌ Validate失败: Token已过期 - 过期时间: ${expiredToken.expires_at}`);
+        } else {
+          console.log('[Yggdrasil] ❌ Validate失败: Token不存在');
+        }
+      }
+
+      // 返回 403 → 启动器会认为 token 无效，阻止启动游戏
       return res.status(403).end();
     }
 
     if (clientToken && tokenRecord.client_token !== clientToken) {
+      console.log(`[Yggdrasil] ❌ Validate失败: clientToken不匹配`);
       return res.status(403).end();
     }
 
-    // 检查 Token 是否暂时失效（角色改名后）
-    if (tokenRecord.is_temporarily_invalidated === 1) {
-      console.log(`[Yggdrasil] Token 已暂时失效（角色改名后），需要刷新`);
-      return res.status(403).end();
-    }
-
+    // Token 有效 → 返回 204 → 启动器允许启动游戏
+    console.log(`[Yggdrasil] ✅ Validate成功: 用户=${tokenRecord.player_name}, Token有效`);
     res.status(204).end();
 
   } catch (error) {
@@ -495,9 +519,36 @@ router.post('/sessionserver/session/minecraft/join', async (req, res) => {
     const tokenRecord = await findTokenByAccessToken(accessToken);
 
     if (!tokenRecord) {
+      // 额外检查：查询token是否存在但已失效，提供更精确的错误提示
+      const db = getDB();
+      const revokedToken = await db('yggdrasil_tokens as t')
+        .where('t.access_token', accessToken)
+        .where('t.is_revoked', 1)
+        .first();
+
+      let errorMessage = 'Invalid token.';
+      if (revokedToken) {
+        errorMessage = `Token已失效(${revokedToken.revoked_reason || '未知原因'})，请在启动器中重新登录`;
+        console.log(`[Yggdrasil] ❌ Join失败: Token已被撤销 - 原因: ${revokedToken.revoked_reason}`);
+        await auditLog('JOIN_FAILED_REVOKED', tokenRecord?.user_id, tokenRecord?.profile_id, req.ip, {
+          reason: revokedToken.revoked_reason,
+          revoked_at: revokedToken.revoked_at
+        });
+      } else {
+        const expiredToken = await db('yggdrasil_tokens')
+          .where('access_token', accessToken)
+          .first();
+        if (expiredToken) {
+          errorMessage = 'Token已过期，请在启动器中重新登录';
+          console.log(`[Yggdrasil] ❌ Join失败: Token已过期 - 过期时间: ${expiredToken.expires_at}`);
+        } else {
+          console.log(`[Yggdrasil] ❌ Join失败: Token不存在`);
+        }
+      }
+
       return res.status(403).json(buildErrorResponse(
         'ForbiddenOperationException',
-        'Invalid token.'
+        errorMessage
       ));
     }
 

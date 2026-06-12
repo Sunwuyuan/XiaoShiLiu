@@ -186,6 +186,19 @@ const router = createRouter({
           name: 'draft_box',
           component: DraftBoxPage
         },
+        // 聊天路由
+        {
+          path: '/chat',
+          name: 'chat',
+          component: () => import('@/views/chat/index.vue'),
+          meta: { requiresAuth: true }
+        },
+        {
+          path: '/chat/:conversationId',
+          name: 'chat_conversation',
+          component: () => import('@/views/chat/index.vue'),
+          meta: { requiresAuth: true }
+        },
         // 经济系统路由
         {
           path: '/economy/shop',

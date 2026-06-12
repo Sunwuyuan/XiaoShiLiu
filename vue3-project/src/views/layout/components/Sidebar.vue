@@ -28,7 +28,7 @@ const menuItems = ref([
   { label: '发现', icon: 'home', path: '/explore' },
   { label: '发布', icon: 'publish', path: '/publish' },
   { label: '通知', icon: 'notification', path: '/notification' },
-  { label: '游戏', icon: 'game', path: '/game' },
+  { label: '聊天', icon: 'chat', path: '/chat' },
   { label: '', icon: 'avatar', path: '/user' },
   { label: '更多', icon: 'menu', path: '' },
 ]);
@@ -139,7 +139,6 @@ onMounted(() => {
         </RouterLink>
       </li>
 
-
       <li v-else>
         <button class="login-btn" @click="handleLoginClick">
           登录
@@ -153,9 +152,9 @@ onMounted(() => {
           <li class="sidebar-footer-item">
             <div class="sidebar-link">
               <span class="sidebar-icon">
-                <SvgIcon :name="menuItems[5].icon" width="24px" height="24px" />
+                <SvgIcon name="menu" width="24px" height="24px" />
               </span>
-              <span class="sidebar-label">{{ menuItems[5].label }}</span>
+              <span class="sidebar-label">更多</span>
             </div>
           </li>
         </template>

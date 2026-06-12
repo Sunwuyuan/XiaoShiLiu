@@ -17,8 +17,9 @@ const aboutStore = useAboutStore()
 const keyboardShortcutsStore = useKeyboardShortcutsStore()
 const accountSecurityStore = useAccountSecurityStore()
 
-// 经济系统导航
-const economyMenuItems = [
+// 游戏功能导航
+const gameMenuItems = [
+  { key: 'game', label: 'MC外置登录', path: '/game' },
   { key: 'shop', label: '商店', path: '/economy/shop' },
   { key: 'inventory', label: '背包', path: '/economy/inventory' },
   { key: 'tasks', label: '任务', path: '/economy/tasks' },
@@ -73,9 +74,12 @@ const handleEconomyNav = (path) => {
     账号与安全
   </DropdownItem>
   <DropdownDivider v-if="userStore.isLoggedIn" />
-  <DropdownItem v-if="userStore.isLoggedIn" v-for="item in economyMenuItems" :key="item.key" @click="handleEconomyNav(item.path)">
+  <DropdownItem v-if="userStore.isLoggedIn" v-for="item in gameMenuItems" :key="item.key" @click="handleEconomyNav(item.path)">
     <span class="economy-menu-item">
-      <svg class="economy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-if="item.key === 'shop'">
+      <svg class="economy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-if="item.key === 'game'">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+      <svg class="economy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-else-if="item.key === 'shop'">
         <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
         <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
       </svg>

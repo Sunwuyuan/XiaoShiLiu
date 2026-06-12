@@ -3,21 +3,30 @@
     <Sidebar v-if="showSidebar" />
     <div class="main-content" :class="{ 'with-sidebar': showSidebar }">
       <LayoutHeader />
-      <div class="content-wrapper">
+      <div class="content-wrapper" :class="{ 'no-footer': isChatPage }">
         <router-view />
       </div>
-      <LayoutFooter v-if="!showSidebar" />
+      <LayoutFooter v-if="!showSidebar && !isChatPage" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
 import LayoutHeader from './components/LayoutHeader.vue'
 import LayoutFooter from './components/LayoutFooter.vue'
 
+const route = useRoute()
 const showSidebar = ref(window.innerWidth > 960)
+
+const isChatPage = computed(() => {
+  const path = route.path
+  // 聊天列表页显示底栏，进入具体会话后隐藏
+  return path.startsWith('/chat/') && path !== '/chat'
+})
+
 const handleResize = () => {
   showSidebar.value = window.innerWidth > 960
 }
@@ -76,6 +85,11 @@ onUnmounted(() => {
   transition: background-color 0.2s ease;
 }
 
+/* 聊天页面不需要底栏 padding */
+.content-wrapper.no-footer {
+  padding-bottom: 0;
+}
+
 @media (max-width: 960px) {
   .main-content {
     margin-left: 0;
@@ -84,17 +98,9 @@ onUnmounted(() => {
   .content-wrapper {
     padding-bottom: 48px;
   }
-}
 
-@media (max-width: 768px) {
-  .content-wrapper {
-    padding-bottom: 48px;
-  }
-}
-
-@media (max-width: 480px) {
-  .content-wrapper {
-    padding-bottom: 48px;
+  .content-wrapper.no-footer {
+    padding-bottom: 0;
   }
 }
 

@@ -24,6 +24,8 @@ const { cleanupExpiredTokens } = require('./utils/yggdrasilHelper');
 const { checkAndMigrateAdminTable } = require('./utils/dbMigration');
 // 导入 Redis 连接功能
 const { connectRedis, disconnectRedis } = require('./utils/redis');
+// 导入 WebSocket 聊天服务初始化
+const { initializeChatServer } = require('./websocket/chatServer');
 // 导入浏览量回写服务
 const { startViewCountFlushService } = require('./utils/viewCountFlush');
 
@@ -58,6 +60,8 @@ const gameRoutes = require('./routes/game');
 // 经济系统路由
 const economyRoutes = require('./routes/economy');
 const achievementsRoutes = require('./routes/achievements');
+// 聊天系统路由
+const chatRoutes = require('./routes/chat');
 
 const app = express();
 
@@ -217,6 +221,8 @@ app.use('/api/economy', economyRoutes);
 app.use('/api/shop', economyRoutes);
 app.use('/api/tasks', economyRoutes);
 app.use('/api/achievements', achievementsRoutes);
+// 聊天系统路由
+app.use('/api/chat', apiLimiter, chatRoutes);
 
 // 错误处理中间件
 app.use((err, req, res, next) => {
@@ -236,7 +242,7 @@ startViewCountFlushService();
 
 // 启动服务器
 const PORT = config.server.port;
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   console.log(`● 服务器运行在端口 ${PORT}`);
   console.log(`● 环境: ${config.server.env}`);
   console.log('========================================');
@@ -284,5 +290,8 @@ app.listen(PORT, async () => {
     console.error('[Yggdrasil] 初始清理过期 Token 失败:', error);
   }
 });
+
+// 初始化 WebSocket 聊天服务
+initializeChatServer(server);
 
 module.exports = app;
