@@ -11,7 +11,7 @@ exports.up = async function(knex) {
 
     // 临时密码信息
     table.string('temp_password_hash', 255).notNullable().comment('临时密码bcrypt哈希');
-    table.string('temp_password_plain', 32).notNullable().comment('临时密码明文（用于展示，创建时一次性显示）');
+    table.string('temp_password_plain', 32).defaultTo(null).comment('临时密码明文（安全考虑不再存储，字段保留兼容）');
 
     // 限制条件
     table.integer('max_uses').defaultTo(1).comment('最大允许登录次数');
