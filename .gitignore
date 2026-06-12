@@ -56,3 +56,5 @@ express-project/keys/private.pem
 express-project/keys/public.pem
 
 target/
+vue3-project/~/.tauri/com.zhaishis.dynamic.key
+vue3-project/~/.tauri/com.zhaishis.dynamic.key.pub
