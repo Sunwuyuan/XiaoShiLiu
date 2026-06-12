@@ -386,8 +386,10 @@ router.post('/callback', async (req, res) => {
       code: RESPONSE_CODES.SUCCESS,
       message: '登录成功',
       data: {
-        user
-        // 不再返回tokens，token已通过安全Cookie传输
+        user,
+        token: accessToken,
+        refresh_token: refreshToken
+        // token同时通过Cookie和响应体返回，兼容Web同源(Cookie)和Tauri跨域(localStorage)场景
       }
     });
   } catch (error) {

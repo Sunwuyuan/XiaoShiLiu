@@ -262,10 +262,15 @@ export const useUserStore = defineStore('user', () => {
       
       console.log('loginWithLogto 接收的数据:', data)
       
-      // Token已通过HttpOnly Cookie设置，无需手动保存
-      // 只保存用户信息
+      // Token已通过HttpOnly Cookie设置，同时从响应体取token存入localStorage（兼容Tauri跨域场景）
       userInfo.value = data.user
       localStorage.setItem('userInfo', JSON.stringify(data.user))
+      if (data.token) {
+        localStorage.setItem('token', data.token)
+      }
+      if (data.refresh_token) {
+        localStorage.setItem('refresh_token', data.refresh_token)
+      }
 
       console.log('已保存的用户信息:', {
         userInfo: !!userInfo.value
