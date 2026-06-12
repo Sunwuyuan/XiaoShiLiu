@@ -10,8 +10,9 @@ pub struct DeepLinkState(Mutex<Option<String>>);
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        // 单实例插件：防止协议回调时打开第二个窗口
+        // 单实例插件：防止协议回调时打开第二个窗口（仅桌面端）
         // 当 dynamic:// 回调触发新实例启动时，参数会转发到已运行的实例
+        #[cfg(desktop)]
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             println!("[Tauri] 单实例收到外部启动参数: {:?}", args);
             for arg in &args {
