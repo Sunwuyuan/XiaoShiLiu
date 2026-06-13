@@ -275,10 +275,6 @@ onMounted(async () => {
           <div class="user-nickname">
             <VerifiedBadge :verified="userInfo?.verified" size="large" />
           </div>
-          <div class="user-content">
-            <div class="user-id text-ellipsis">悦社号：{{ userInfo?.user_id || '' }}</div>
-            <div class="user-IP text-ellipsis">IP属地：{{ userInfo?.location || '未知' }}</div>
-          </div>
         </div>
 
         <div class="follow-button-wrapper" v-if="!isCurrentUser">
