@@ -453,7 +453,8 @@ function handleCollect(data) {
 
 /* ---------- 2. 布局容器样式 ---------- */
 .content-container {
-  padding-top: 72px;
+  padding-top: calc(72px + constant(safe-area-inset-top));
+  padding-top: calc(72px + env(safe-area-inset-top));
   margin: 0 auto;
   width: 100%;
   max-width: 1200px;

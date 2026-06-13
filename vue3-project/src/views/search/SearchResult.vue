@@ -473,7 +473,8 @@ onUnmounted(() => {
 
 <style scoped>
 .search-container {
-    padding-top: 72px;
+    padding-top: calc(72px + constant(safe-area-inset-top));
+    padding-top: calc(72px + env(safe-area-inset-top));
     min-height: 100vh;
     background: var(--bg-color-primary);
     transition: background 0.2s ease;

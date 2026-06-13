@@ -142,7 +142,8 @@ onMounted(() => {
 
 <style scoped>
 .game-container {
-  padding-top: 72px;
+  padding-top: calc(72px + constant(safe-area-inset-top));
+  padding-top: calc(72px + env(safe-area-inset-top));
   min-height: 100vh;
   background: var(--bg-color-primary);
   padding-bottom: calc(48px + constant(safe-area-inset-bottom));

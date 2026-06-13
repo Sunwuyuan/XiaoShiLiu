@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      build_debug_windows:
+        description: '构建 Windows Debug 版本（带 F12 开发者工具，用于排查打包后网络错误）'
+        required: false
+        default: false
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -189,6 +195,76 @@ jobs:
           path: |
             vue3-project/src-tauri/gen/android/app/build/outputs/apk/
             vue3-project/src-tauri/gen/android/app/build/outputs/bundle/
+          retention-days: 30
+
+  # Windows Debug 构建（带 F12 开发者工具，用于排查打包后网络错误）
+  publish-windows-debug:
+    if: github.event.inputs.build_debug_windows == 'true'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            vue3-project/src-tauri/target/
+          key: tauri-windows-debug-${{ hashFiles('vue3-project/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            tauri-windows-debug-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vue3-project/package-lock.json
+
+      - name: Install frontend dependencies and build
+        working-directory: vue3-project
+        run: npm ci && npm run build
+
+      - name: Setup Tauri signing key
+        env:
+          TAURI_PRIVATE_KEY_CONTENT: ${{ secrets.TAURI_PRIVATE_KEY }}
+        working-directory: vue3-project
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.tauri"
+          echo "$TAURI_PRIVATE_KEY_CONTENT" > "$HOME/.tauri/com.zhaishis.dynamic.key"
+
+      - name: Build Windows Debug App (with F12 devtools)
+        working-directory: vue3-project
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        run: npm run tauri build -- --debug --bundles nsis
+
+      - name: List build outputs
+        shell: bash
+        run: |
+          echo "=== debug bundle ==="
+          find vue3-project/src-tauri/target/debug/bundle/ -maxdepth 4 -type f 2>/dev/null | head -20 || echo "未找到 debug 构建产物"
+
+      - name: Upload debug bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dynamic-windows-debug-${{ github.sha }}
+          path: vue3-project/src-tauri/target/debug/bundle/
+          if-no-files-found: warn
           retention-days: 30
 
   # iOS 构建
