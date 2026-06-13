@@ -248,11 +248,6 @@ header {
     z-index: 1000;
     width: 100%;
     transition: border-color 0.2s ease, background-color 0.2s ease;
-    /* Android/iOS 避让系统状态栏 */
-    padding-top: constant(safe-area-inset-top);
-    padding-top: env(safe-area-inset-top);
-    height: calc(72px + constant(safe-area-inset-top));
-    height: calc(72px + env(safe-area-inset-top));
 }
 
 .header-container {
