@@ -327,6 +327,14 @@ router.put('/read-all', authenticateToken, async (req, res) => {
       .where({ user_id: userId, is_read: false })
       .update({ is_read: true });
 
+    // 清除 Redis 未读数缓存，避免下次读取到旧值
+    try {
+      const { delCache } = require('../utils/redis');
+      await delCache(`notify:unread:${userId}`);
+    } catch (e) {
+      // Redis 不可用，忽略
+    }
+
     res.json({ code: RESPONSE_CODES.SUCCESS, message: '全部标记成功' });
   } catch (error) {
     console.error('标记所有通知已读失败:', error);
@@ -354,6 +362,14 @@ router.put('/:id/read', authenticateToken, async (req, res) => {
     await db('notifications')
       .where({ id: notificationId })
       .update({ is_read: true });
+
+    // 清除 Redis 未读数缓存，避免下次读取到旧值
+    try {
+      const { delCache } = require('../utils/redis');
+      await delCache(`notify:unread:${userId}`);
+    } catch (e) {
+      // Redis 不可用，忽略
+    }
 
     res.json({ code: RESPONSE_CODES.SUCCESS, message: '标记成功' });
   } catch (error) {
